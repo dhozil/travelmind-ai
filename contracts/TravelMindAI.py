@@ -119,7 +119,7 @@ class TravelMindAI(gl.Contract):
 
         raw = gl.eq_principle.prompt_comparative(
             plan_all,
-            "Both must be valid JSON arrays.",
+            "Both are valid responses.",
         )
         daily_plans = _to_dict(raw)
         if isinstance(daily_plans, dict):

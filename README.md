@@ -7,15 +7,15 @@ AI-powered travel recommendation platform built on **GenLayer** Intelligent Cont
 ## How it works
 
 ```
-User prompt → GenLayer contract → 2 AI validators (prompt_comparative) → consensus → result
+User prompt → GenLayer contract → AI validators (prompt_comparative) → consensus → result
 ```
 
-Every recommendation, itinerary, travel match, and hidden gem finding goes through GenLayer's `prompt_comparative` consensus mechanism. Two independent validators (GPT-4, Claude) each run the same prompt, and the contract reconciles their outputs. The transaction is signed via MetaMask (GenLayer Snap) and settled on Studionet.
+Every recommendation, itinerary, travel match, and hidden gem finding goes through GenLayer's `prompt_comparative` consensus mechanism. Multiple independent validators run the same prompt, and the contract reconciles their outputs. The transaction is signed via MetaMask (GenLayer Snap) and settled on Studionet.
 
 ### Features
 
 - **AI Recommendation** — Describe your ideal trip in natural language; the AI extracts preferences and finds matching destinations
-- **Itinerary Generator** — Generate complete day-by-day travel plans with schedules, costs, and dining
+- **Itinerary Generator** — Generate day-by-day travel plans with daily highlights and cost estimates
 - **Travel Match** — Describe a travel vibe (or reference an image) and find destinations with matching atmosphere
 - **Hidden Gem Finder** — Discover off-the-beaten-path destinations before they become tourist hotspots
 - **On-chain Storage** — Save trips and recommendations to the contract, keyed by your wallet address
@@ -82,7 +82,7 @@ npm install
 NEXT_PUBLIC_SUPABASE_URL=https://txabofbwpyojtusvcbrp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
-NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x251Ad979A7c784bfa29F93d49d247e6084B1d5aD
+NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x0d7571b54Aa359b7087984d3D4AAe901ba883945
 ```
 
 ### Dev
@@ -135,7 +135,8 @@ travelmind-ai/
 ## Design Decisions
 
 - **No fake data** — All stats, testimonials, and team content are real (from Supabase or the contract). No hallucinations.
-- **Single `prompt_comparative` per method** — Previously chained 3+ AI calls per request (analyze → search → score), each requiring separate validator rounds. Now consolidated into one prompt per method, reducing latency from minutes to ~15-30 seconds.
-- **Store-then-poll pattern** — AI methods store their result in a TreeMap before returning. The frontend polls a `@gl.public.view` getter after the transaction is accepted, following the same pattern as PatchworkTruth and Glyphwright.
-- **`TransactionStatus.ACCEPTED`** — Waits for acceptance (not finalization) for faster UX, matching Glyphwright's approach.
-- **No `simulateWriteContract`** — All writes go through real `writeContract` with MetaMask signing. The `simulateWriteContract` API is not used.
+- **Simplified prompts** — Concise prompts reduce LLM response time and malformed JSON from validators.
+- **`_to_dict` with JSON repair** — Handles missing commas and trailing commas from AI validators using regex fix before parsing.
+- **Store-then-poll pattern** — AI methods store their result in a TreeMap before returning. The frontend polls a `@gl.public.view` getter after the transaction is accepted.
+- **`prompt_comparative` with lenient criteria** — Comparison criteria is kept minimal ("Both are valid responses") to avoid consensus failures from minor formatting differences.
+- **No `simulateWriteContract`** — All writes go through real `writeContract` with MetaMask signing.

@@ -95,26 +95,24 @@ class TravelMindAI(gl.Contract):
     ) -> str:
         def plan_all() -> str:
             return gl.nondet.exec_prompt(
-                f"Plan a {int(days)}-day itinerary for {destination}.\n"
-                f"Total budget: ${int(budget)}, {int(travelers)} travelers.\n"
-                f"Preferences: \"{preferences}\"\n"
-                f"Return ONLY a JSON array of {int(days)} day objects (day 1 to {int(days)}), "
-                "each with: day_number int, activities[] (time, activity_name, description, "
-                "location, estimated_cost, activity_type), "
-                "meals[] (type breakfast/lunch/dinner, time, restaurant, estimated_cost), "
-                "accommodation {{name, cost}}, total_day_cost int.",
+                f"Create a {int(days)}-day travel plan for {destination}.\n"
+                f"Budget: ${int(budget)}, Travelers: {int(travelers)}\n"
+                f"Style: {preferences}\n"
+                "Return JSON array. Each item: day (int), title (short), "
+                "highlights (array of 3 strings), cost (int USD).",
                 response_format="json",
             )
 
         raw = gl.eq_principle.prompt_comparative(
             plan_all,
-            "Both outputs must be valid JSON arrays with the same length and structure. "
-            "Values may differ. The contract uses the first result.",
+            "Both outputs must be valid JSON arrays. Structure: "
+            "[{{day:1,title:'...',highlights:['...','...','...'],cost:100}}]. "
+            "Values may differ.",
         )
         daily_plans = _to_dict(raw)
         if isinstance(daily_plans, dict):
             daily_plans = [daily_plans]
-        total_cost = sum(p.get("total_day_cost", 0) for p in daily_plans)
+        total_cost = sum(p.get("cost", 0) for p in daily_plans)
 
         result = json.dumps({
             "destination": destination,

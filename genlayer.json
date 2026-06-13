@@ -1,0 +1,39 @@
+{
+  "name": "TravelMind AI",
+  "description": "AI-powered travel recommendation platform with multi-validator consensus on GenLayer.",
+  "version": "1.0.0",
+  "network": "studionet",
+  "contracts": {
+    "TravelMindAI": {
+      "file": "contracts/TravelMindAI.py",
+      "name": "TravelMind AI",
+      "description": "Unified contract: AI recommendations, itineraries, travel match, hidden gems, on-chain storage",
+      "address": "0x251Ad979A7c784bfa29F93d49d247e6084B1d5aD",
+      "validators": [
+        { "id": "alpha", "model": "gpt-4", "weight": 1 },
+        { "id": "beta", "model": "claude-3", "weight": 1 },
+        { "id": "gamma", "model": "gemini-pro", "weight": 1 }
+      ],
+      "consensus_threshold": 0.67,
+      "public_methods": [
+        "recommend", "generate_itinerary", "match_by_image",
+        "find_hidden_gems", "save_trip", "save_recommendation",
+        "get_trip", "get_recommendation", "get_user_trips",
+        "get_user_recommendations", "get_stats"
+      ]
+    }
+  },
+  "frontend_integration": {
+    "client_lib": "lib/genlayer.ts",
+    "required_env_vars": [
+      "NEXT_PUBLIC_GENLAYER_RPC_URL",
+      "NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS"
+    ],
+    "wallet_integration": "genlayer-js"
+  },
+  "deployment": {
+    "network": "studionet",
+    "gas_limit": 5000000,
+    "confirmations": 2
+  }
+}

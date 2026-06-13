@@ -4,6 +4,18 @@ from genlayer import *
 import json
 
 
+def _fix_json(s):
+    """Fix malformed JSON from AI validators: missing commas, trailing commas."""
+    import re
+    # Add missing commas between key-value pairs: "val""key" -> "val","key"
+    s = re.sub(r'"([^"]*)"(\s*)"', r'"\1", "\2"', s, flags=re.DOTALL)
+    # Add missing comma after value before next key: "val"  "key" -> "val", "key"
+    s = re.sub(r'("[^"]*")(\s+)(?=")', r'\1,\2', s)
+    # Remove trailing commas before } or ]
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+    return s
+
+
 def _to_dict(raw):
     """Convert prompt_comparative result to dict.
     Handles: dict (pass-through), str (strip code fences + parse JSON).
@@ -19,6 +31,11 @@ def _to_dict(raw):
             if cleaned.endswith("```"):
                 cleaned = cleaned[:-3]
         cleaned = cleaned.strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+        cleaned = _fix_json(cleaned)
         try:
             return json.loads(cleaned)
         except Exception:
@@ -95,19 +112,14 @@ class TravelMindAI(gl.Contract):
     ) -> str:
         def plan_all() -> str:
             return gl.nondet.exec_prompt(
-                f"Create a {int(days)}-day travel plan for {destination}.\n"
-                f"Budget: ${int(budget)}, Travelers: {int(travelers)}\n"
-                f"Style: {preferences}\n"
-                "Return JSON array. Each item: day (int), title (short), "
-                "highlights (array of 3 strings), cost (int USD).",
+                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}. "
+                "Return JSON: [{day:1, title:'...', highlights:['...'], cost:0}]",
                 response_format="json",
             )
 
         raw = gl.eq_principle.prompt_comparative(
             plan_all,
-            "Both outputs must be valid JSON arrays. Structure: "
-            "[{{day:1,title:'...',highlights:['...','...','...'],cost:100}}]. "
-            "Values may differ.",
+            "Both must be valid JSON arrays.",
         )
         daily_plans = _to_dict(raw)
         if isinstance(daily_plans, dict):
@@ -117,8 +129,6 @@ class TravelMindAI(gl.Contract):
         result = json.dumps({
             "destination": destination,
             "total_days": int(days),
-            "total_travelers": int(travelers),
-            "total_budget": int(budget),
             "daily_plans": daily_plans[:int(days)],
             "total_cost": total_cost,
         })

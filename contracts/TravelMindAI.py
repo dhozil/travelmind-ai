@@ -122,9 +122,27 @@ class TravelMindAI(gl.Contract):
             "Both are valid responses.",
         )
         daily_plans = _to_dict(raw)
+        
+        # Handle AI returning nested structure like {destination, itinerary: [{day, title, ...}]}
         if isinstance(daily_plans, dict):
-            daily_plans = [daily_plans]
-        total_cost = sum(p.get("cost", 0) for p in daily_plans)
+            if "itinerary" in daily_plans and isinstance(daily_plans["itinerary"], list):
+                daily_plans = daily_plans["itinerary"]
+            else:
+                daily_plans = [daily_plans]
+        elif isinstance(daily_plans, list) and len(daily_plans) > 0:
+            # Check if first item has nested itinerary
+            first = daily_plans[0]
+            if isinstance(first, dict) and "itinerary" in first:
+                # Flatten: extract itinerary from each item
+                flat = []
+                for item in daily_plans:
+                    if isinstance(item, dict) and "itinerary" in item:
+                        flat.extend(item["itinerary"])
+                    else:
+                        flat.append(item)
+                daily_plans = flat
+        
+        total_cost = sum(p.get("cost", 0) for p in daily_plans if isinstance(p, dict))
 
         result = json.dumps({
             "destination": destination,

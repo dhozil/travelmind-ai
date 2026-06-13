@@ -123,26 +123,36 @@ class TravelMindAI(gl.Contract):
         )
         daily_plans = _to_dict(raw)
         
-        # Handle AI returning nested structure like {destination, itinerary: [{day, title, ...}]}
+        # Normalize to flat list of day objects
+        flat = []
         if isinstance(daily_plans, dict):
-            if "itinerary" in daily_plans and isinstance(daily_plans["itinerary"], list):
-                daily_plans = daily_plans["itinerary"]
-            else:
-                daily_plans = [daily_plans]
-        elif isinstance(daily_plans, list) and len(daily_plans) > 0:
-            # Check if first item has nested itinerary
-            first = daily_plans[0]
-            if isinstance(first, dict) and "itinerary" in first:
-                # Flatten: extract itinerary from each item
-                flat = []
-                for item in daily_plans:
-                    if isinstance(item, dict) and "itinerary" in item:
-                        flat.extend(item["itinerary"])
-                    else:
+            # Check for nested arrays: plan, itinerary, days, items
+            for key in ["plan", "itinerary", "days", "items"]:
+                if key in daily_plans and isinstance(daily_plans[key], list):
+                    flat = daily_plans[key]
+                    break
+            if not flat:
+                flat = [daily_plans]
+        elif isinstance(daily_plans, list):
+            for item in daily_plans:
+                if isinstance(item, dict):
+                    found = False
+                    for key in ["plan", "itinerary", "days", "items"]:
+                        if key in item and isinstance(item[key], list):
+                            flat.extend(item[key])
+                            found = True
+                            break
+                    if not found:
                         flat.append(item)
-                daily_plans = flat
+                elif isinstance(item, list):
+                    flat.extend(item)
         
-        total_cost = sum(p.get("cost", 0) for p in daily_plans if isinstance(p, dict))
+        daily_plans = flat
+        total_cost = sum(
+            p.get("total_cost", p.get("cost", 0))
+            for p in daily_plans
+            if isinstance(p, dict)
+        )
 
         result = json.dumps({
             "destination": destination,

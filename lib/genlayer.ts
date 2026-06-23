@@ -217,70 +217,39 @@ async function writeThenPoll(
 
   const hash = typeof writeResult === 'string' ? writeResult : writeResult?.hash;
 
-  // Wait for receipt (may return before consensus data is ready)
-  const receipt: any = await client.waitForTransactionReceipt({
-    hash,
-    status: TransactionStatus.ACCEPTED,
-    retries: 1200,
-    interval: 2000,
-  });
+  // Poll transaction status until consensus_data is available
+  const pollIntervalMs = 10000; // 10 seconds
 
-  // Log receipt structure for debugging
-  console.log('[GenLayer] receipt status:', receipt?.status, 'result:', receipt?.result);
-  console.log('[GenLayer] consensus_data:', receipt?.consensus_data ? JSON.stringify(receipt.consensus_data).slice(0, 500) : 'N/A');
-
-  // Try to extract from consensus_data
-  let consensusVal: any = null;
-  try {
-    const lr = receipt?.consensus_data?.leader_receipt?.[0];
-    const raw = lr?.result?.payload?.readable || lr?.eq_outputs?.['0']?.payload?.readable;
-    if (raw && typeof raw === 'string') {
-      const p = JSON.parse(raw);
-      consensusVal = typeof p === 'string' ? JSON.parse(p) : p;
-    }
-  } catch { /* will poll instead */ }
-
-  // Poll the view method (TreeMap) — this is the reliable path
-  const sender = addr.toLowerCase();
-  const pollIntervalMs = 5000; // 5 seconds between polls
-  const maxPolls = 360;       // 360 * 5s = 30 minutes max wait
-
-  for (let attempt = 1; attempt <= maxPolls; attempt++) {
-    // Try consensus value from receipt first (if available)
-    if (consensusVal) return consensusVal;
-
-    // Try pollView on the view method
+  for (let attempt = 1; attempt <= 180; attempt++) {
     try {
-      const stored = await callView(viewMethod, [sender]);
-      const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
-      const isEmpty = !str || str === 'null' || str === 'undefined' || str === '{}' || str.trim() === '';
-      if (!isEmpty) return stored;
+      const tx: any = await (client as any).getTransaction({ hash });
+
+      // Check if result is available (leader_receipt with readable payload)
+      const lr = tx?.consensus_data?.leader_receipt?.[0];
+      if (lr) {
+        const raw = lr?.result?.payload?.readable || lr?.eq_outputs?.['0']?.payload?.readable;
+        if (raw && typeof raw === 'string') {
+          const p = JSON.parse(raw);
+          const result = typeof p === 'string' ? JSON.parse(p) : p;
+          if (result) return result;
+        }
+      }
+
+      // Also try view method (TreeMap) - might be updated by now
+      for (const variant of [addr, addr.toLowerCase()]) {
+        try {
+          const stored = await callView(viewMethod, [variant]);
+          const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
+          if (str && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
+            return stored;
+          }
+        } catch { /* try next */ }
+      }
     } catch { /* retry */ }
 
-    // Also re-try receipt extraction (receipt might be updated)
-    if (!consensusVal && attempt % 30 === 0) {
-      try {
-        const tx = await (client as any).getTransaction({ hash });
-        const lr = tx?.consensus_data?.leader_receipt?.[0];
-        if (lr) {
-          let raw = lr?.result?.payload?.readable || lr?.eq_outputs?.['0']?.payload?.readable;
-          if (raw && typeof raw === 'string') {
-            const p = JSON.parse(raw);
-            consensusVal = typeof p === 'string' ? JSON.parse(p) : p;
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    if (attempt < maxPolls) {
-      await new Promise(r => setTimeout(r, pollIntervalMs));
-    }
+    await new Promise(r => setTimeout(r, pollIntervalMs));
   }
 
-  // Final check: consensus from initial receipt
-  if (consensusVal) return consensusVal;
-
-  console.error('[GenLayer] All attempts exhausted. Hash:', hash);
   throw new Error('GenVM execution returned empty result.');
 }
 

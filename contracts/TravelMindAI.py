@@ -29,10 +29,13 @@ def _extract_json(text: str) -> dict:
 
 
 def _parse_recommendations(text: str) -> list:
-    """Parse pipe-delimited recommendation text into list of dicts."""
+    """Parse pipe-delimited recommendation text into list of dicts.
+    
+    Format from LLM:
+      recommendations-6 | best_season | Nov-Feb | description | ... | estimated_cost | location<Myanmar | match_score | name,Bagan6
+    """
     recs = []
     
-    # Split by '6' as record separator
     sections = text.split("6")
     
     for section in sections:
@@ -40,55 +43,59 @@ def _parse_recommendations(text: str) -> list:
         if not section or len(section) < 20:
             continue
         
-        # Skip the header "recommendations" part
         if section.startswith("recommendations"):
             section = section.replace("recommendations", "", 1).strip(" -|")
             if not section:
                 continue
         
-        rec = {"name": "", "location": "", "description": "", "best_season": "", "match_score": 75}
+        rec = {"name": "", "location": "", "description": "", "best_season": "", "match_score": 75, "estimated_cost": {"min": 500, "max": 2000}}
         
-        # Split by pipe
         parts = [p.strip() for p in section.split("|") if p.strip()]
         
-        for part in parts:
-            p = part.strip()
+        i = 0
+        while i < len(parts):
+            p = parts[i]
             pl = p.lower()
             
-            if "best_season" in pl:
-                val = p.split("best_season", 1)[-1].strip(": -")
-                if val:
-                    rec["best_season"] = val
-            elif "description" in pl:
-                val = p.split("description", 1)[-1].strip(": -")
-                if val:
-                    rec["description"] = val[:300]
-            elif "location" in pl:
-                val = p.split("location", 1)[-1].strip(": -<>DdLl,")
-                if val:
-                    rec["location"] = val
-            elif "match_score" in pl:
-                val = p.split("match_score", 1)[-1].strip(": -")
-                try:
-                    rec["match_score"] = int(val)
-                except:
-                    pass
-            elif "name" in pl:
-                val = p.split("name", 1)[-1].strip(": -<>DdLl,")
-                if val:
-                    rec["name"] = val
-        
-        # If no name found, try to extract from beginning
-        if not rec["name"]:
-            # Look for capitalized words at start
-            m = regex_mod.match(r'^([A-Z][a-zA-Z\s&\'-]+?)(?:\s*\||\s*6|$)', section)
-            if m:
-                candidate = m.group(1).strip()
-                if len(candidate) > 3:
-                    rec["name"] = candidate
+            # Combined: location<X, locationDX, name,X, nameDX
+            # Strip only the separator chars (single char after keyword)
+            for prefix, key in [("location<", "location"), ("locationd", "location"), 
+                               ("locationl", "location"), ("location,", "location"),
+                               ("name<", "name"), ("named", "name"),
+                               ("namel", "name"), ("name,", "name")]:
+                if pl.startswith(prefix):
+                    # Strip exactly the keyword + separator char(s)
+                    val = p[len(prefix):].strip()
+                    if val:
+                        rec[key] = val
+                    break
+            else:
+                # Standalone key -> next part is value
+                if pl == "best_season" and i + 1 < len(parts):
+                    rec["best_season"] = parts[i + 1].strip()
+                    i += 2
+                    continue
+                elif pl == "description" and i + 1 < len(parts):
+                    rec["description"] = parts[i + 1].strip()[:300]
+                    i += 2
+                    continue
+                elif pl == "estimated_cost":
+                    i += 1
+                    continue
+                elif pl == "match_score":
+                    i += 1
+                    if i < len(parts):
+                        nxt = parts[i].strip()
+                        try:
+                            rec["match_score"] = int(nxt)
+                            i += 1
+                        except:
+                            pass
+                    continue
+            
+            i += 1
         
         if rec["description"] or rec["location"] or rec["name"]:
-            rec.setdefault("estimated_cost", {"min": 500, "max": 2000})
             recs.append(rec)
     
     return recs

@@ -51,6 +51,30 @@ def _safe_json(raw) -> dict:
     return {}
 
 
+def _normalize_recommendations(data: dict, query: str, limit: int) -> dict:
+    """Ensure recommendations response has correct structure."""
+    prefs = data.get("preferences", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
+    recs = data.get("recommendations", [])
+    if not isinstance(recs, list):
+        recs = []
+    # Clean up each recommendation
+    clean_recs = []
+    for r in recs[:limit]:
+        if not isinstance(r, dict):
+            continue
+        clean_recs.append({
+            "name": str(r.get("name", "Unknown")),
+            "location": str(r.get("location", "Unknown")),
+            "description": str(r.get("description", "")),
+            "match_score": int(r.get("match_score", 50)),
+            "best_season": str(r.get("best_season", "Year-round")),
+            "estimated_cost": r.get("estimated_cost", {"min": 0, "max": 0}),
+        })
+    return {"preferences": prefs, "recommendations": clean_recs}
+
+
 class TravelMindAI(gl.Contract):
     saved_trips: TreeMap[str, str]
     saved_recommendations: TreeMap[str, str]
@@ -78,13 +102,14 @@ class TravelMindAI(gl.Contract):
             return (
                 f"You are a travel expert. User query: \"{query}\"\n"
                 f"Generate exactly {limit} destination recommendations.\n"
-                "Return ONLY valid JSON with exactly 2 keys:\n"
-                "1. \"preferences\": object with destination_type, budget_min, budget_max, "
+                "You MUST return valid JSON. No markdown, no code fences.\n"
+                "Format: {\"preferences\":{...},\"recommendations\":[...]}\n"
+                "preferences keys: destination_type, budget_min, budget_max, "
                 "duration_days, group_type, activities (array of 3-5 strings)\n"
-                f"2. \"recommendations\": array of exactly {limit} objects, each with: "
+                f"recommendations: array of {limit} objects with: "
                 "name, location, description (1-2 sentences), match_score (int 0-100), "
                 "best_season, estimated_cost {min, max} in USD\n"
-                "Sort recommendations by match_score descending."
+                "Sort by match_score descending."
             )
 
         def leader_fn() -> dict:
@@ -110,14 +135,13 @@ class TravelMindAI(gl.Contract):
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         data = _safe_json(raw) if not isinstance(raw, dict) else raw
-        prefs = data.get("preferences", {}) if isinstance(data, dict) else {}
-        recs = data.get("recommendations", []) if isinstance(data, dict) else []
-        if not isinstance(recs, list):
-            recs = []
+        data = _normalize_recommendations(data, query, limit)
+        prefs = data.get("preferences", {})
+        recs = data.get("recommendations", [])
         result = json.dumps({
             "query": query,
             "preferences": prefs,
-            "recommendations": recs[:limit],
+            "recommendations": recs,
             "validator_id": str(gl.message.sender_address),
         })
         self.last_recommendation[str(gl.message.sender_address)] = result
@@ -134,9 +158,9 @@ class TravelMindAI(gl.Contract):
     ) -> str:
         def build_prompt() -> str:
             return (
-                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}. "
-                "Return ONLY valid JSON: "
-                "[{\"day\":1,\"title\":\"...\",\"highlights\":[\"...\"],\"cost\":0}]"
+                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}.\n"
+                "You MUST return valid JSON. No markdown, no code fences.\n"
+                "Format: [{\"day\":1,\"title\":\"...\",\"highlights\":[\"...\"],\"cost\":0}]"
             )
 
         def leader_fn() -> dict:
@@ -220,11 +244,11 @@ class TravelMindAI(gl.Contract):
             return (
                 f"Analyze this travel vibe and find matching destinations.\n"
                 f"Image hash: {image_hash}, User caption: \"{caption}\"\n"
-                "Return ONLY valid JSON with exactly 2 keys:\n"
-                "1. \"image_analysis\": {\"landscape_type\":\"...\",\"atmosphere\":\"...\","
-                "\"dominant_colors\":[],\"natural_elements\":[],"
-                "\"human_activity_level\":50,\"vibe_summary\":\"...\"}\n"
-                f"2. \"matches\": array of {int(max_results)} destinations, each with: "
+                "You MUST return valid JSON. No markdown, no code fences.\n"
+                "Format: {\"image_analysis\":{...},\"matches\":[...]}\n"
+                "image_analysis keys: landscape_type, atmosphere, dominant_colors, "
+                "natural_elements, human_activity_level (0-100), vibe_summary\n"
+                f"matches: array of {int(max_results)} destinations with: "
                 "name, location, why_match, match_score (0-100), "
                 "estimated_cost {min,max}, image_vibe_match (0-100), description."
             )
@@ -270,10 +294,11 @@ class TravelMindAI(gl.Contract):
                 f"Query: \"{preferences}\"\n"
                 f"Max budget: ${int(budget_max)}, Category: {category}\n"
                 "Hidden = not widely known, authentic, minimal commercial tourism.\n"
-                "Return ONLY valid JSON array. Each element:\n"
-                "  name, location, description, hidden_score (0-100), "
-                "estimated_cost {min,max} USD, why_hidden, best_season, tags [], "
-                "authenticity_rating (0-100), comparable_popular_spot."
+                "You MUST return valid JSON. No markdown, no code fences.\n"
+                "Format: [{\"name\":\"...\",\"location\":\"...\",\"description\":\"...\","
+                "\"hidden_score\":0-100,\"estimated_cost\":{\"min\":0,\"max\":0},"
+                "\"why_hidden\":\"...\",\"best_season\":\"...\",\"tags\":[],"
+                "\"authenticity_rating\":0-100,\"comparable_popular_spot\":\"...\"}]"
             )
 
         def leader_fn() -> dict:

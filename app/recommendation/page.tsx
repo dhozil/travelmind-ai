@@ -142,7 +142,7 @@ export default function RecommendationPage() {
 
       try {
         setConsensusPhase('validating');
-        setAnalyzedPreferences(['Waiting for validator consensus (up to 20 min)...']);
+        setAnalyzedPreferences(['Waiting for validator consensus (20-30 minutes)...']);
         const genResult = await getRecommendation(query);
         genLayerRecs = (genResult?.recommendations) || [];
         const prefs = genResult?.preferences || {};

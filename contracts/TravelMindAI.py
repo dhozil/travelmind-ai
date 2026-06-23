@@ -130,18 +130,8 @@ class TravelMindAI(gl.Contract):
             return {"recommendations": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
-            if not isinstance(leader, gl.vm.Return):
-                return False
-            mine = leader_fn()
-            l_recs = leader.calldata.get("recommendations", [])
-            v_recs = mine.get("recommendations", [])
-            if not isinstance(l_recs, list):
-                l_recs = []
-            if not isinstance(v_recs, list):
-                v_recs = []
-            if abs(len(l_recs) - len(v_recs)) > 2:
-                return False
-            return True
+            # Accept leader result directly - no second LLM call
+            return isinstance(leader, gl.vm.Return)
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         
@@ -217,18 +207,7 @@ class TravelMindAI(gl.Contract):
             return {"daily_plans": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
-            if not isinstance(leader, gl.vm.Return):
-                return False
-            mine = leader_fn()
-            l_plans = leader.calldata.get("daily_plans", [])
-            v_plans = mine.get("daily_plans", [])
-            if not isinstance(l_plans, list):
-                l_plans = []
-            if not isinstance(v_plans, list):
-                v_plans = []
-            if abs(len(l_plans) - len(v_plans)) > 1:
-                return False
-            return True
+            return isinstance(leader, gl.vm.Return)
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
@@ -287,18 +266,7 @@ class TravelMindAI(gl.Contract):
             return {"matches": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
-            if not isinstance(leader, gl.vm.Return):
-                return False
-            mine = leader_fn()
-            l_matches = leader.calldata.get("matches", [])
-            v_matches = mine.get("matches", [])
-            if not isinstance(l_matches, list):
-                l_matches = []
-            if not isinstance(v_matches, list):
-                v_matches = []
-            if abs(len(l_matches) - len(v_matches)) > 2:
-                return False
-            return True
+            return isinstance(leader, gl.vm.Return)
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
@@ -340,18 +308,7 @@ class TravelMindAI(gl.Contract):
             return {"hidden_gems": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
-            if not isinstance(leader, gl.vm.Return):
-                return False
-            mine = leader_fn()
-            l_gems = leader.calldata.get("hidden_gems", [])
-            v_gems = mine.get("hidden_gems", [])
-            if not isinstance(l_gems, list):
-                l_gems = []
-            if not isinstance(v_gems, list):
-                v_gems = []
-            if abs(len(l_gems) - len(v_gems)) > 3:
-                return False
-            return True
+            return isinstance(leader, gl.vm.Return)
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))

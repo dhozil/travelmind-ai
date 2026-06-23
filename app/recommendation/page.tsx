@@ -142,6 +142,7 @@ export default function RecommendationPage() {
 
       try {
         setConsensusPhase('validating');
+        setAnalyzedPreferences(['Waiting for validator consensus (up to 20 min)...']);
         const genResult = await getRecommendation(query);
         genLayerRecs = (genResult?.recommendations) || [];
         const prefs = genResult?.preferences || {};
@@ -162,8 +163,10 @@ export default function RecommendationPage() {
         await new Promise((r) => setTimeout(r, 400));
       } catch (e) {
         console.warn('GenLayer failed:', e);
-        setAnalyzedPreferences(['GenLayer tx failed — using local analysis']);
+        setAnalyzedPreferences(['GenLayer tx failed — ' + (e instanceof Error ? e.message : String(e))]);
         setConsensusPhase('idle');
+        setIsLoading(false);
+        return;
       }
     }
 

@@ -195,22 +195,29 @@ export default function RecommendationPage() {
       const nameToDest = new Map((allDests || []).map((d: Destination) => [d.name.toLowerCase(), d]));
 
       for (const rec of genLayerRecs) {
-        const src = rec.destination || rec;
-        const dn = src.name || '';
+        const dn = rec.name || '';
         const dbMatch = nameToDest.get(dn.toLowerCase());
+
+        const estCost = rec.estimated_cost || {};
+        const costMin = typeof estCost === 'object' ? (estCost.min || null) : null;
+        const costMax = typeof estCost === 'object' ? (estCost.max || null) : null;
+
+        const bestSeason = rec.best_season || '';
+        const seasonParts = bestSeason.includes(' - ') ? bestSeason.split(' - ') : [bestSeason, ''];
+
         const enriched: any = {
           id: dbMatch?.id || `gen_${dn}`,
           name: dn,
-          location: src.location || '',
-          description: src.description || '',
+          location: rec.location || '',
+          description: rec.description || '',
           image_url: dbMatch?.image_url || null,
-          tags: src.tags || [],
-          average_cost_min: src.estimated_cost?.min || null,
-          average_cost_max: src.estimated_cost?.max || null,
-          best_time_start: src.best_season?.split(' - ')[0] || null,
-          best_time_end: src.best_season?.split(' - ')[1] || null,
-          vibe_type: src.vibe_type || null,
-          authenticity_score: src.authenticity_estimate || 85,
+          tags: rec.tags || dbMatch?.tags || [],
+          average_cost_min: costMin || dbMatch?.average_cost_min || null,
+          average_cost_max: costMax || dbMatch?.average_cost_max || null,
+          best_time_start: seasonParts[0] || dbMatch?.best_time_start || null,
+          best_time_end: seasonParts[1] || dbMatch?.best_time_end || null,
+          vibe_type: rec.vibe_type || dbMatch?.vibe_type || null,
+          authenticity_score: dbMatch?.authenticity_score || 85,
           popularity_score: dbMatch?.popularity_score || 50,
           is_hidden_gem: dbMatch?.is_hidden_gem || false,
           activities: dbMatch?.activities || [],

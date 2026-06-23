@@ -59,18 +59,27 @@ def _normalize_recommendations(data: dict, query: str, limit: int) -> dict:
     recs = data.get("recommendations", [])
     if not isinstance(recs, list):
         recs = []
-    # Clean up each recommendation
     clean_recs = []
     for r in recs[:limit]:
         if not isinstance(r, dict):
             continue
+        est = r.get("estimated_cost", {})
+        if isinstance(est, dict):
+            cost_min = est.get("min", 0)
+            cost_max = est.get("max", 0)
+        elif isinstance(est, (int, float)):
+            cost_min = int(est)
+            cost_max = int(est)
+        else:
+            cost_min = 0
+            cost_max = 0
         clean_recs.append({
             "name": str(r.get("name", "Unknown")),
             "location": str(r.get("location", "Unknown")),
             "description": str(r.get("description", "")),
             "match_score": int(r.get("match_score", 50)),
             "best_season": str(r.get("best_season", "Year-round")),
-            "estimated_cost": r.get("estimated_cost", {"min": 0, "max": 0}),
+            "estimated_cost": {"min": int(cost_min), "max": int(cost_max)},
         })
     return {"preferences": prefs, "recommendations": clean_recs}
 

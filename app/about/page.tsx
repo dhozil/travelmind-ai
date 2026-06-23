@@ -43,7 +43,7 @@ const timeline = [
   { year: '2024 Q3', event: 'Launched AI Itinerary Generator' },
   { year: '2024 Q4', event: 'Added Travel Match and Hidden Gems features' },
   { year: '2025', event: 'Expanded to global destinations worldwide' },
-  { year: '2026', event: 'Integrated with GenLayer StudioNet' },
+  { year: '2026', event: 'Integrated with GenLayer Bradbury Testnet' },
 ];
 
 export default function AboutPage() {

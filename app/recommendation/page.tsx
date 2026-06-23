@@ -413,9 +413,9 @@ export default function RecommendationPage() {
                         {consensusPhase === 'complete' ? 'Consensus Reached' : 'Multi-Validator Consensus'}
                       </CardTitle>
                       <CardDescription>
-                        {consensusPhase === 'submitting' && 'Submitting to GenLayer StudioNet...'}
-                        {consensusPhase === 'validating' && '3 AI validators analyzing your query independently...'}
-                        {consensusPhase === 'comparing' && 'Comparing validator outputs via prompt_comparative...'}
+                        {consensusPhase === 'submitting' && 'Submitting to GenLayer Bradbury...'}
+                        {consensusPhase === 'validating' && 'AI validators analyzing your query independently...'}
+                        {consensusPhase === 'comparing' && 'Comparing validator outputs via run_nondet_unsafe...'}
                         {consensusPhase === 'complete' && 'All validators agreed on-chain — result verified'}
                       </CardDescription>
                     </div>
@@ -478,10 +478,10 @@ export default function RecommendationPage() {
                     {/* Consensus Details Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
                       {[
-                        { icon: Network, label: 'Network', value: 'Studionet' },
-                        { icon: Shield, label: 'Mechanism', value: 'prompt_comparative' },
+                        { icon: Network, label: 'Network', value: 'Bradbury' },
+                        { icon: Shield, label: 'Mechanism', value: 'run_nondet_unsafe' },
                         { icon: Zap, label: 'Threshold', value: '≥ 67%' },
-                        { icon: Globe, label: 'Chain ID', value: '61999' },
+                        { icon: Globe, label: 'Chain ID', value: '4221' },
                       ].map((item, i) => (
                         <div key={i} className={`p-2 rounded-lg text-center transition-all duration-500 ${
                           consensusPhase === 'complete'

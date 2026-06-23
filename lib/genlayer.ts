@@ -69,7 +69,7 @@ async function simulateWrite(method: string, args: any[]): Promise<unknown> {
 }
 
 /** Poll a view method until it returns a non-empty result (GenLayer TreeMap delay) */
-async function pollView(method: string, args: any[], maxAttempts = 600, baseIntervalMs = 2000): Promise<any> {
+async function pollView(method: string, args: any[], maxAttempts = 120, baseIntervalMs = 2000): Promise<any> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const result = await callView(method, args);

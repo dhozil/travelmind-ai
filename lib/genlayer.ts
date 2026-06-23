@@ -148,7 +148,7 @@ export async function connectWallet(): Promise<`0x${string}`> {
   saveStoredAddress(addr);
   const client = buildWalletClient(addr);
   try {
-    await (client as any).connect('testnet-bradbury');
+    await (client as any).connect('testnetBradbury');
     connectedOnce = true;
   } catch (e) {
     console.warn('[GenLayer] Snap connection failed, will retry before write:', e);
@@ -167,7 +167,7 @@ async function ensureConnected(addr: `0x${string}`) {
   if (connectedOnce && walletAddress === addr) return;
   const client = buildWalletClient(addr);
   try {
-    await (client as any).connect('testnet-bradbury');
+    await (client as any).connect('testnetBradbury');
     connectedOnce = true;
   } catch (e) {
     console.warn('[GenLayer] Snap reconnect failed, proceeding with write:', e);

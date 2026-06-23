@@ -196,7 +196,7 @@ async function writeAndWait(method: string, args: any[]): Promise<void> {
   });
 }
 
-// ── AI helpers: submit tx, then poll view method until result appears ──
+// ── AI helpers: submit tx, poll receipt until result appears ──
 
 async function writeThenPoll(
   writeMethod: string, writeArgs: any[],
@@ -208,18 +208,38 @@ async function writeThenPoll(
   const client = buildWalletClient(addr);
 
   // Submit — MetaMask signs, tx goes to consensus
-  await client.writeContract({
+  const writeResult: any = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: writeMethod,
     args: writeArgs as never[],
     value: BigInt(0),
   });
 
-  // Poll the view method (TreeMap) until consensus updates it
-  // Bradbury consensus takes ~20-30 minutes
+  const hash = typeof writeResult === 'string' ? writeResult : writeResult?.hash;
+
+  const eth = (window as any).ethereum;
+
+  // Poll tx receipt via eth_getTransactionReceipt
+  // Also try eth_call for view method
   const pollIntervalMs = 10000;
 
   for (let attempt = 1; attempt <= 180; attempt++) {
+    // Path 1: eth_getTransactionReceipt — get raw receipt with return data
+    if (eth) {
+      try {
+        const receipt: any = await eth.request({
+          method: 'eth_getTransactionReceipt',
+          params: [hash],
+        });
+        if (receipt && receipt.status === '0x1') {
+          // Try to extract return value from receipt
+          const returnVal = extractReturnValue(receipt);
+          if (returnVal) return returnVal;
+        }
+      } catch { /* not available yet */ }
+    }
+
+    // Path 2: poll view method (TreeMap) — might work for some contracts
     for (const variant of [addr, addr.toLowerCase()]) {
       try {
         const stored = await callView(viewMethod, [variant]);
@@ -227,12 +247,55 @@ async function writeThenPoll(
         if (str && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
           return stored;
         }
-      } catch { /* try next variant */ }
+      } catch { /* try next */ }
     }
+
     await new Promise(r => setTimeout(r, pollIntervalMs));
   }
 
   throw new Error('GenVM execution returned empty result.');
+}
+
+/** Try to extract return value from a GenLayer tx receipt */
+function extractReturnValue(receipt: any): any {
+  // Check various locations for the return value
+  const candidates = [
+    receipt?.result,
+    receipt?.output,
+    receipt?.returnValue,
+    receipt?.data,
+    receipt?.logs?.[0]?.data,
+  ];
+
+  for (const c of candidates) {
+    if (!c) continue;
+    const str = typeof c === 'string' ? c : JSON.stringify(c);
+    if (!str || str === '0x') continue;
+
+    // Try to parse as JSON
+    try { return JSON.parse(str); } catch {}
+
+    // Hex string — decode to UTF-8
+    if (typeof c === 'string' && /^0x[0-9a-f]+$/i.test(c)) {
+      try {
+        const hex = c.replace('0x', '');
+        const bytes = [];
+        for (let i = 0; i < hex.length; i += 2) {
+          bytes.push(parseInt(hex.substring(i, i + 2), 16));
+        }
+        const decoded = new TextDecoder().decode(new Uint8Array(bytes));
+        if (decoded && decoded.length > 5) {
+          try { return JSON.parse(decoded); } catch { return decoded; }
+        }
+      } catch {}
+    }
+
+    // Plain string
+    if (str.length > 10) {
+      try { return JSON.parse(str); } catch { return str; }
+    }
+  }
+  return null;
 }
 
 // ── 1. AI RECOMMENDATION ──────────────────────────────────────────

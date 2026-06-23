@@ -28,6 +28,66 @@ def _extract_json(text: str) -> dict:
     return {}
 
 
+def _parse_recommendations(text: str) -> list:
+    """Parse pipe-delimited recommendation text into list of dicts."""
+    recs = []
+    # Split by record separator (6)
+    sections = regex_mod.split(r'(?<=\w)6', text)
+    
+    for section in sections:
+        section = section.strip()
+        if not section or len(section) < 30:
+            continue
+        
+        rec = {}
+        parts = [p.strip() for p in section.split("|") if p.strip()]
+        
+        for i, part in enumerate(parts):
+            pl = part.lower().strip()
+            if pl.startswith("best_season"):
+                val = pl.replace("best_season", "").strip(": |")
+                if val:
+                    rec["best_season"] = val
+            elif pl.startswith("description"):
+                val = pl.replace("description", "").strip(": |")
+                if val:
+                    rec["description"] = val[:300]
+            elif pl.startswith("location"):
+                val = pl.replace("location", "").strip(": |<>DdLl,")
+                if val:
+                    rec["location"] = val
+            elif pl.startswith("match_score"):
+                val = pl.replace("match_score", "").strip(": |")
+                try:
+                    rec["match_score"] = int(val)
+                except:
+                    rec["match_score"] = 75
+            elif pl.startswith("estimated_cost"):
+                val = pl.replace("estimated_cost", "").strip(": |")
+                if val:
+                    rec["estimated_cost_text"] = val
+            elif pl.startswith("name"):
+                val = pl.replace("name", "").strip(": |<>DdLl,")
+                if val:
+                    rec["name"] = val
+        
+        # Extract name from beginning if not found
+        if not rec.get("name"):
+            name_match = regex_mod.search(r'^([A-Z][a-zA-Z\s&\'-]+?)(?:\s*6|\s*\|)', section)
+            if name_match:
+                rec["name"] = name_match.group(1).strip()
+        
+        if rec.get("description") or rec.get("location"):
+            rec.setdefault("name", "Unknown")
+            rec.setdefault("location", "Unknown")
+            rec.setdefault("match_score", 75)
+            rec.setdefault("best_season", "Year-round")
+            rec["estimated_cost"] = {"min": 500, "max": 2000}
+            recs.append(rec)
+    
+    return recs
+
+
 class TravelMindAI(gl.Contract):
     saved_trips: TreeMap[str, str]
     saved_recommendations: TreeMap[str, str]
@@ -78,8 +138,20 @@ class TravelMindAI(gl.Contract):
             return True
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
-        if not result:
+        
+        # Try JSON first, then pipe format
+        if isinstance(raw, dict):
+            result = raw
+        elif isinstance(raw, str):
+            result = _extract_json(raw)
+            if not result or not result.get("recommendations"):
+                # Try pipe format parsing
+                recs = _parse_recommendations(raw)
+                if recs:
+                    result = {"recommendations": recs}
+                else:
+                    result = {"recommendations": []}
+        else:
             result = {"recommendations": []}
 
         recs = result.get("recommendations", [])

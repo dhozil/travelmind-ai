@@ -29,75 +29,102 @@ def _extract_json(text: str) -> dict:
 
 
 def _parse_recommendations(text: str) -> list:
-    """Parse pipe-delimited recommendation text into list of dicts.
-    
-    Format from LLM:
-      recommendations-6 | best_season | Nov-Feb | description | ... | estimated_cost | location<Myanmar | match_score | name,Bagan6
-    """
+    """Parse pipe-delimited recommendation text into list of dicts."""
     recs = []
-    
+
     sections = text.split("6")
-    
+
     for section in sections:
         section = section.strip()
         if not section or len(section) < 20:
             continue
-        
+
         if section.startswith("recommendations"):
             section = section.replace("recommendations", "", 1).strip(" -|")
             if not section:
                 continue
-        
+
         rec = {"name": "", "location": "", "description": "", "best_season": "", "match_score": 75, "estimated_cost": {"min": 500, "max": 2000}}
-        
+
         parts = [p.strip() for p in section.split("|") if p.strip()]
-        
+
         i = 0
         while i < len(parts):
             p = parts[i]
             pl = p.lower()
-            
-            # Combined: location<X, locationDX, name,X, nameDX
-            # Strip only the separator chars (single char after keyword)
-            for prefix, key in [("location<", "location"), ("locationd", "location"), 
+
+            # Combined key-value: location<, locationD, locationl, location, name<, named, namel, name,, nameT
+            combined = False
+            for prefix, key in [("location<", "location"), ("locationd", "location"),
                                ("locationl", "location"), ("location,", "location"),
                                ("name<", "name"), ("named", "name"),
-                               ("namel", "name"), ("name,", "name")]:
+                               ("namel", "name"), ("name,", "name"),
+                               ("namet", "name")]:
                 if pl.startswith(prefix):
-                    # Strip exactly the keyword + separator char(s)
                     val = p[len(prefix):].strip()
                     if val:
                         rec[key] = val
+                    combined = True
                     break
+            if combined:
+                i += 1
+                continue
+
+            # Standalone keys
+            if pl == "best_season" and i + 1 < len(parts):
+                rec["best_season"] = parts[i + 1].strip()
+                i += 2
+            elif pl == "description" and i + 1 < len(parts):
+                rec["description"] = parts[i + 1].strip()[:300]
+                i += 2
+            elif pl == "estimated_cost":
+                # Next part might be location value or empty
+                if i + 1 < len(parts):
+                    nxt = parts[i + 1].strip()
+                    nxtl = nxt.lower()
+                    # If next part is NOT a known key, treat as location value
+                    if nxtl not in ("best_season", "description", "estimated_cost", "match_score") and not any(nxtl.startswith(p) for p in ["location", "name"]):
+                        if not rec["location"]:
+                            rec["location"] = nxt
+                        i += 2
+                    else:
+                        i += 1
+                else:
+                    i += 1
+            elif pl == "match_score":
+                # Next part might be name value (not a number)
+                if i + 1 < len(parts):
+                    nxt = parts[i + 1].strip()
+                    nxtl = nxt.lower()
+                    try:
+                        rec["match_score"] = int(nxt)
+                        i += 2
+                    except:
+                        # Check combined key-value: nameXvalue
+                        nm = False
+                        for prefix, key in [("name<", "name"), ("named", "name"),
+                                           ("namel", "name"), ("name,", "name"),
+                                           ("namet", "name")]:
+                            if nxtl.startswith(prefix):
+                                val = nxt[len(prefix):].strip()
+                                if val:
+                                    rec[key] = val
+                                nm = True
+                                break
+                        if not nm:
+                            # Plain text after match_score = name
+                            if not any(nxtl.startswith(p) for p in ["location"]):
+                                if not rec["name"]:
+                                    rec["name"] = nxt
+                        i += 2
+                else:
+                    i += 1
             else:
-                # Standalone key -> next part is value
-                if pl == "best_season" and i + 1 < len(parts):
-                    rec["best_season"] = parts[i + 1].strip()
-                    i += 2
-                    continue
-                elif pl == "description" and i + 1 < len(parts):
-                    rec["description"] = parts[i + 1].strip()[:300]
-                    i += 2
-                    continue
-                elif pl == "estimated_cost":
-                    i += 1
-                    continue
-                elif pl == "match_score":
-                    i += 1
-                    if i < len(parts):
-                        nxt = parts[i].strip()
-                        try:
-                            rec["match_score"] = int(nxt)
-                            i += 1
-                        except:
-                            pass
-                    continue
-            
-            i += 1
-        
+                i += 1
+
         if rec["description"] or rec["location"] or rec["name"]:
             recs.append(rec)
-    
+
     return recs
 
 

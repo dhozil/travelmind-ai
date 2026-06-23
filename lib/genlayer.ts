@@ -227,7 +227,7 @@ async function writeThenPoll(
 
   // Log receipt structure for debugging
   console.log('[GenLayer] receipt status:', receipt?.status, 'result:', receipt?.result);
-  console.log('[GenLayer] consensus_data:', JSON.stringify(receipt?.consensus_data).slice(0, 500));
+  console.log('[GenLayer] consensus_data:', receipt?.consensus_data ? JSON.stringify(receipt.consensus_data).slice(0, 500) : 'N/A');
 
   // Try to extract from consensus_data
   let consensusVal: any = null;

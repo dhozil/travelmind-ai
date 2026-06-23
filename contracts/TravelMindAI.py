@@ -157,13 +157,17 @@ class TravelMindAI(gl.Contract):
         def leader_fn() -> dict:
             prompt = (
                 f"Recommend {limit} travel destinations for: {query}\n"
-                "Return JSON: {\"recommendations\":[{\"name\":\"...\",\"location\":\"...\","
-                "\"description\":\"...\",\"match_score\":85,\"best_season\":\"...\","
-                "\"estimated_cost\":{\"min\":500,\"max\":2000}}]}"
+                "Each must have: name, location, description (1-2 sentences), "
+                "match_score (60-95, how well it matches the query), "
+                "best_season (e.g. November to February), "
+                "estimated_cost with min and max in USD (e.g. 500 and 2000).\n"
+                "Return valid JSON array."
             )
             res = gl.nondet.exec_prompt(prompt, response_format="json")
             if isinstance(res, dict):
                 return res
+            if isinstance(res, list):
+                return {"recommendations": res}
             return {"recommendations": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:

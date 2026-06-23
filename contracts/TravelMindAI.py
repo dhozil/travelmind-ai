@@ -28,62 +28,6 @@ def _extract_json(text: str) -> dict:
     return {}
 
 
-def _fix_json(s: str) -> str:
-    """Fix malformed JSON: missing commas, trailing commas."""
-    s = regex_mod.sub(r'"([^"]*)"(\s*)"', r'"\1", "\2"', s, flags=regex_mod.DOTALL)
-    s = regex_mod.sub(r'("[^"]*")(\s+)(?=")', r'\1,\2', s)
-    s = regex_mod.sub(r',\s*([}\]])', r'\1', s)
-    return s
-
-
-def _safe_json(raw) -> dict:
-    """Parse JSON from dict or str, with fix fallback."""
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        result = _extract_json(raw)
-        if result:
-            return result
-        fixed = _fix_json(raw)
-        result = _extract_json(fixed)
-        if result:
-            return result
-    return {}
-
-
-def _normalize_recommendations(data: dict, query: str, limit: int) -> dict:
-    """Ensure recommendations response has correct structure."""
-    prefs = data.get("preferences", {})
-    if not isinstance(prefs, dict):
-        prefs = {}
-    recs = data.get("recommendations", [])
-    if not isinstance(recs, list):
-        recs = []
-    clean_recs = []
-    for r in recs[:limit]:
-        if not isinstance(r, dict):
-            continue
-        est = r.get("estimated_cost", {})
-        if isinstance(est, dict):
-            cost_min = est.get("min", 0)
-            cost_max = est.get("max", 0)
-        elif isinstance(est, (int, float)):
-            cost_min = int(est)
-            cost_max = int(est)
-        else:
-            cost_min = 0
-            cost_max = 0
-        clean_recs.append({
-            "name": str(r.get("name", "Unknown")),
-            "location": str(r.get("location", "Unknown")),
-            "description": str(r.get("description", "")),
-            "match_score": int(r.get("match_score", 50)),
-            "best_season": str(r.get("best_season", "Year-round")),
-            "estimated_cost": {"min": int(cost_min), "max": int(cost_max)},
-        })
-    return {"preferences": prefs, "recommendations": clean_recs}
-
-
 class TravelMindAI(gl.Contract):
     saved_trips: TreeMap[str, str]
     saved_recommendations: TreeMap[str, str]
@@ -107,49 +51,70 @@ class TravelMindAI(gl.Contract):
     def recommend(self, query: str, max_results: bigint = 5) -> str:
         limit = int(max_results) if max_results > 0 else 5
 
-        def build_prompt() -> str:
-            return (
-                "You are a travel expert. Respond ONLY with valid JSON.\n"
-                f"User wants: {query}\n"
-                f"Return exactly {limit} destinations.\n\n"
-                '{"preferences":{"destination_type":"...","budget_min":0,"budget_max":0,"duration_days":0,"group_type":"...","activities":["..."]},"recommendations":[{"name":"...","location":"...","description":"...","match_score":0,"best_season":"...","estimated_cost":{"min":0,"max":0}}]}\n\n'
-                "IMPORTANT: Output ONLY the JSON object. No text before or after."
-            )
-
         def leader_fn() -> dict:
-            p = build_prompt()
-            res = gl.nondet.exec_prompt(p, response_format="json")
+            prompt = (
+                f"Recommend {limit} travel destinations for: {query}\n"
+                "Return JSON: {\"recommendations\":[{\"name\":\"...\",\"location\":\"...\","
+                "\"description\":\"...\",\"match_score\":85,\"best_season\":\"...\","
+                "\"estimated_cost\":{\"min\":500,\"max\":2000}}]}"
+            )
+            res = gl.nondet.exec_prompt(prompt, response_format="json")
             if isinstance(res, dict):
                 return res
-            return {"preferences": {}, "recommendations": []}
+            return {"recommendations": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
             if not isinstance(leader, gl.vm.Return):
                 return False
             mine = leader_fn()
-            l_recs = len(leader.calldata.get("recommendations", []))
-            v_recs = len(mine.get("recommendations", []))
-            if abs(l_recs - v_recs) > 2:
-                return False
-            l_prefs = leader.calldata.get("preferences", {})
-            v_prefs = mine.get("preferences", {})
-            if type(l_prefs) != type(v_prefs):
+            l_recs = leader.calldata.get("recommendations", [])
+            v_recs = mine.get("recommendations", [])
+            if not isinstance(l_recs, list):
+                l_recs = []
+            if not isinstance(v_recs, list):
+                v_recs = []
+            if abs(len(l_recs) - len(v_recs)) > 2:
                 return False
             return True
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        data = _safe_json(raw) if not isinstance(raw, dict) else raw
-        data = _normalize_recommendations(data, query, limit)
-        prefs = data.get("preferences", {})
-        recs = data.get("recommendations", [])
-        result = json.dumps({
+        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
+        if not result:
+            result = {"recommendations": []}
+
+        recs = result.get("recommendations", [])
+        if not isinstance(recs, list):
+            recs = []
+
+        # Clean each recommendation
+        clean_recs = []
+        for r in recs[:limit]:
+            if not isinstance(r, dict):
+                continue
+            est = r.get("estimated_cost", {})
+            if isinstance(est, dict):
+                cost_min = est.get("min", 0)
+                cost_max = est.get("max", 0)
+            else:
+                cost_min = 0
+                cost_max = 0
+            clean_recs.append({
+                "name": str(r.get("name", "Unknown")),
+                "location": str(r.get("location", "Unknown")),
+                "description": str(r.get("description", "")),
+                "match_score": int(r.get("match_score", 75)),
+                "best_season": str(r.get("best_season", "Year-round")),
+                "estimated_cost": {"min": int(cost_min), "max": int(cost_max)},
+            })
+
+        out = json.dumps({
             "query": query,
-            "preferences": prefs,
-            "recommendations": recs,
+            "preferences": result.get("preferences", {}),
+            "recommendations": clean_recs,
             "validator_id": str(gl.message.sender_address),
         })
-        self.last_recommendation[str(gl.message.sender_address)] = result
-        return result
+        self.last_recommendation[str(gl.message.sender_address)] = out
+        return out
 
     # ═══════════════════════════════════════════════════════════════════
     # 2. ITINERARY GENERATOR
@@ -160,18 +125,13 @@ class TravelMindAI(gl.Contract):
         self, destination: str, days: bigint,
         budget: bigint, travelers: bigint, preferences: str,
     ) -> str:
-        def build_prompt() -> str:
-            return (
-                "You are a travel planner. Respond ONLY with valid JSON.\n"
-                f"Plan {int(days)} days in {destination}.\n"
-                f"Budget: ${int(budget)}. Style: {preferences}\n\n"
-                '{"daily_plans":[{"day":1,"title":"...","highlights":["..."],"cost":0}]}\n\n'
-                "IMPORTANT: Output ONLY the JSON object. No text before or after."
-            )
-
         def leader_fn() -> dict:
-            p = build_prompt()
-            res = gl.nondet.exec_prompt(p, response_format="json")
+            prompt = (
+                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}\n"
+                "Return JSON: {\"daily_plans\":[{\"day\":1,\"title\":\"...\","
+                "\"highlights\":[\"...\"],\"cost\":100}]}"
+            )
+            res = gl.nondet.exec_prompt(prompt, response_format="json")
             if isinstance(res, dict):
                 return res
             if isinstance(res, list):
@@ -182,7 +142,7 @@ class TravelMindAI(gl.Contract):
             if not isinstance(leader, gl.vm.Return):
                 return False
             mine = leader_fn()
-            l_plans = leader.calldata.get("daily_plans", leader.calldata if isinstance(leader.calldata, list) else [])
+            l_plans = leader.calldata.get("daily_plans", [])
             v_plans = mine.get("daily_plans", [])
             if not isinstance(l_plans, list):
                 l_plans = []
@@ -193,52 +153,43 @@ class TravelMindAI(gl.Contract):
             return True
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        
-        # Parse result
-        if isinstance(raw, dict):
-            daily_plans = raw.get("daily_plans", [])
-        elif isinstance(raw, list):
-            daily_plans = raw
-        else:
-            daily_plans = []
-        
-        # Normalize to flat list of day objects
+        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
+        if not result:
+            result = {"daily_plans": []}
+
+        plans = result.get("daily_plans", [])
+        if not isinstance(plans, list):
+            plans = []
+
+        # Normalize nested structures
         flat = []
-        if isinstance(daily_plans, dict):
-            for key in ["plan", "itinerary", "days", "items"]:
-                if key in daily_plans and isinstance(daily_plans[key], list):
-                    flat = daily_plans[key]
-                    break
-            if not flat:
-                flat = [daily_plans]
-        elif isinstance(daily_plans, list):
-            for item in daily_plans:
-                if isinstance(item, dict):
-                    found = False
-                    for key in ["plan", "itinerary", "days", "items"]:
-                        if key in item and isinstance(item[key], list):
-                            flat.extend(item[key])
-                            found = True
-                            break
-                    if not found:
-                        flat.append(item)
-                elif isinstance(item, list):
-                    flat.extend(item)
-        
+        for item in plans:
+            if isinstance(item, dict):
+                found = False
+                for key in ["plan", "itinerary", "days", "items"]:
+                    if key in item and isinstance(item[key], list):
+                        flat.extend(item[key])
+                        found = True
+                        break
+                if not found:
+                    flat.append(item)
+            elif isinstance(item, list):
+                flat.extend(item)
+
         total_cost = sum(
             p.get("total_cost", p.get("cost", 0))
             for p in flat
             if isinstance(p, dict)
         )
 
-        result = json.dumps({
+        out = json.dumps({
             "destination": destination,
             "total_days": int(days),
             "daily_plans": flat[:int(days)],
             "total_cost": total_cost,
         })
-        self.last_itinerary[str(gl.message.sender_address)] = result
-        return result
+        self.last_itinerary[str(gl.message.sender_address)] = out
+        return out
 
     # ═══════════════════════════════════════════════════════════════════
     # 3. TRAVEL MATCH
@@ -246,40 +197,46 @@ class TravelMindAI(gl.Contract):
 
     @gl.public.write
     def match_by_image(self, image_hash: str, caption: str, max_results: bigint = 5) -> str:
-        def build_prompt() -> str:
-            return (
-                "You are a travel vibe analyzer. Respond ONLY with valid JSON.\n"
-                f"Caption: {caption}\n"
-                f"Find {int(max_results)} matching destinations.\n\n"
-                '{"image_analysis":{"landscape_type":"...","atmosphere":"...","vibe_summary":"..."},"matches":[{"name":"...","location":"...","match_score":0,"description":"..."}]}\n\n'
-                "IMPORTANT: Output ONLY the JSON object. No text before or after."
-            )
-
         def leader_fn() -> dict:
-            p = build_prompt()
-            res = gl.nondet.exec_prompt(p, response_format="json")
+            prompt = (
+                f"Find {int(max_results)} destinations matching this vibe: {caption}\n"
+                "Return JSON: {\"matches\":[{\"name\":\"...\",\"location\":\"...\","
+                "\"match_score\":85,\"description\":\"...\"}]}"
+            )
+            res = gl.nondet.exec_prompt(prompt, response_format="json")
             if isinstance(res, dict):
                 return res
-            return {"image_analysis": {}, "matches": []}
+            return {"matches": []}
 
         def validator_fn(leader: gl.vm.Result) -> bool:
             if not isinstance(leader, gl.vm.Return):
                 return False
             mine = leader_fn()
-            l_matches = len(leader.calldata.get("matches", []))
-            v_matches = len(mine.get("matches", []))
-            if abs(l_matches - v_matches) > 2:
+            l_matches = leader.calldata.get("matches", [])
+            v_matches = mine.get("matches", [])
+            if not isinstance(l_matches, list):
+                l_matches = []
+            if not isinstance(v_matches, list):
+                v_matches = []
+            if abs(len(l_matches) - len(v_matches)) > 2:
                 return False
             return True
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        data = _safe_json(raw) if not isinstance(raw, dict) else raw
-        result = json.dumps({
-            "image_analysis": data.get("image_analysis", {}),
-            "matches": data.get("matches", [])[:int(max_results)],
+        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
+        if not result:
+            result = {"matches": []}
+
+        matches = result.get("matches", [])
+        if not isinstance(matches, list):
+            matches = []
+
+        out = json.dumps({
+            "image_analysis": result.get("image_analysis", {}),
+            "matches": matches[:int(max_results)],
         })
-        self.last_match[str(gl.message.sender_address)] = result
-        return result
+        self.last_match[str(gl.message.sender_address)] = out
+        return out
 
     # ═══════════════════════════════════════════════════════════════════
     # 4. HIDDEN GEM FINDER
@@ -290,18 +247,14 @@ class TravelMindAI(gl.Contract):
         self, preferences: str,
         budget_max: bigint = 0, category: str = "any", max_results: bigint = 10,
     ) -> str:
-        def build_prompt() -> str:
-            return (
-                "You are a hidden gem travel finder. Respond ONLY with valid JSON.\n"
-                f"Find {int(max_results)} hidden gems for: {preferences}\n"
-                f"Budget: ${int(budget_max)}, Category: {category}\n\n"
-                '{"hidden_gems":[{"name":"...","location":"...","description":"...","hidden_score":0,"estimated_cost":{"min":0,"max":0},"best_season":"..."}]}\n\n'
-                "IMPORTANT: Output ONLY the JSON object. No text before or after."
-            )
-
         def leader_fn() -> dict:
-            p = build_prompt()
-            res = gl.nondet.exec_prompt(p, response_format="json")
+            prompt = (
+                f"Find {int(max_results)} hidden gem destinations for: {preferences}\n"
+                f"Budget: ${int(budget_max)}, Category: {category}\n"
+                "Return JSON: {\"hidden_gems\":[{\"name\":\"...\",\"location\":\"...\","
+                "\"description\":\"...\",\"hidden_score\":85,\"best_season\":\"...\"}]}"
+            )
+            res = gl.nondet.exec_prompt(prompt, response_format="json")
             if isinstance(res, list):
                 return {"hidden_gems": res}
             if isinstance(res, dict):
@@ -312,7 +265,7 @@ class TravelMindAI(gl.Contract):
             if not isinstance(leader, gl.vm.Return):
                 return False
             mine = leader_fn()
-            l_gems = leader.calldata.get("hidden_gems", leader.calldata if isinstance(leader.calldata, list) else [])
+            l_gems = leader.calldata.get("hidden_gems", [])
             v_gems = mine.get("hidden_gems", [])
             if not isinstance(l_gems, list):
                 l_gems = []
@@ -323,20 +276,17 @@ class TravelMindAI(gl.Contract):
             return True
 
         raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        
-        if isinstance(raw, dict):
-            gems = raw.get("hidden_gems", [])
-        elif isinstance(raw, list):
-            gems = raw
-        else:
+        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
+        if not result:
+            result = {"hidden_gems": []}
+
+        gems = result.get("hidden_gems", [])
+        if not isinstance(gems, list):
             gems = []
-        
-        if isinstance(gems, dict):
-            gems = [gems]
-        
-        result = json.dumps({"hidden_gems": gems[:int(max_results)]})
-        self.last_gems[str(gl.message.sender_address)] = result
-        return result
+
+        out = json.dumps({"hidden_gems": gems[:int(max_results)]})
+        self.last_gems[str(gl.message.sender_address)] = out
+        return out
 
     # ═══════════════════════════════════════════════════════════════════
     # 5. ON-CHAIN STORAGE

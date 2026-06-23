@@ -31,58 +31,64 @@ def _extract_json(text: str) -> dict:
 def _parse_recommendations(text: str) -> list:
     """Parse pipe-delimited recommendation text into list of dicts."""
     recs = []
-    # Split by record separator (6)
-    sections = regex_mod.split(r'(?<=\w)6', text)
+    
+    # Split by '6' as record separator
+    sections = text.split("6")
     
     for section in sections:
         section = section.strip()
-        if not section or len(section) < 30:
+        if not section or len(section) < 20:
             continue
         
-        rec = {}
+        # Skip the header "recommendations" part
+        if section.startswith("recommendations"):
+            section = section.replace("recommendations", "", 1).strip(" -|")
+            if not section:
+                continue
+        
+        rec = {"name": "", "location": "", "description": "", "best_season": "", "match_score": 75}
+        
+        # Split by pipe
         parts = [p.strip() for p in section.split("|") if p.strip()]
         
-        for i, part in enumerate(parts):
-            pl = part.lower().strip()
-            if pl.startswith("best_season"):
-                val = pl.replace("best_season", "").strip(": |")
+        for part in parts:
+            p = part.strip()
+            pl = p.lower()
+            
+            if "best_season" in pl:
+                val = p.split("best_season", 1)[-1].strip(": -")
                 if val:
                     rec["best_season"] = val
-            elif pl.startswith("description"):
-                val = pl.replace("description", "").strip(": |")
+            elif "description" in pl:
+                val = p.split("description", 1)[-1].strip(": -")
                 if val:
                     rec["description"] = val[:300]
-            elif pl.startswith("location"):
-                val = pl.replace("location", "").strip(": |<>DdLl,")
+            elif "location" in pl:
+                val = p.split("location", 1)[-1].strip(": -<>DdLl,")
                 if val:
                     rec["location"] = val
-            elif pl.startswith("match_score"):
-                val = pl.replace("match_score", "").strip(": |")
+            elif "match_score" in pl:
+                val = p.split("match_score", 1)[-1].strip(": -")
                 try:
                     rec["match_score"] = int(val)
                 except:
-                    rec["match_score"] = 75
-            elif pl.startswith("estimated_cost"):
-                val = pl.replace("estimated_cost", "").strip(": |")
-                if val:
-                    rec["estimated_cost_text"] = val
-            elif pl.startswith("name"):
-                val = pl.replace("name", "").strip(": |<>DdLl,")
+                    pass
+            elif "name" in pl:
+                val = p.split("name", 1)[-1].strip(": -<>DdLl,")
                 if val:
                     rec["name"] = val
         
-        # Extract name from beginning if not found
-        if not rec.get("name"):
-            name_match = regex_mod.search(r'^([A-Z][a-zA-Z\s&\'-]+?)(?:\s*6|\s*\|)', section)
-            if name_match:
-                rec["name"] = name_match.group(1).strip()
+        # If no name found, try to extract from beginning
+        if not rec["name"]:
+            # Look for capitalized words at start
+            m = regex_mod.match(r'^([A-Z][a-zA-Z\s&\'-]+?)(?:\s*\||\s*6|$)', section)
+            if m:
+                candidate = m.group(1).strip()
+                if len(candidate) > 3:
+                    rec["name"] = candidate
         
-        if rec.get("description") or rec.get("location"):
-            rec.setdefault("name", "Unknown")
-            rec.setdefault("location", "Unknown")
-            rec.setdefault("match_score", 75)
-            rec.setdefault("best_season", "Year-round")
-            rec["estimated_cost"] = {"min": 500, "max": 2000}
+        if rec["description"] or rec["location"] or rec["name"]:
+            rec.setdefault("estimated_cost", {"min": 500, "max": 2000})
             recs.append(rec)
     
     return recs

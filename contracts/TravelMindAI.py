@@ -54,12 +54,15 @@ def _parse_recommendations(text: str) -> list:
             pl = p.lower()
 
             # Combined key-value: location<, locationD, locationl, location, name<, named, namel, name,, nameT
+            # Also: best_seasont, descriptiont
             combined = False
             for prefix, key in [("location<", "location"), ("locationd", "location"),
                                ("locationl", "location"), ("location,", "location"),
                                ("name<", "name"), ("named", "name"),
                                ("namel", "name"), ("name,", "name"),
-                               ("namet", "name")]:
+                               ("namet", "name"), ("name\\", "name"),
+                               ("best_seasont", "best_season"),
+                               ("descriptiont", "description")]:
                 if pl.startswith(prefix):
                     val = p[len(prefix):].strip()
                     if val:
@@ -104,7 +107,7 @@ def _parse_recommendations(text: str) -> list:
                         nm = False
                         for prefix, key in [("name<", "name"), ("named", "name"),
                                            ("namel", "name"), ("name,", "name"),
-                                           ("namet", "name")]:
+                                           ("namet", "name"), ("name\\", "name")]:
                             if nxtl.startswith(prefix):
                                 val = nxt[len(prefix):].strip()
                                 if val:

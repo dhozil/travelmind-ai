@@ -131,6 +131,55 @@ def _parse_recommendations(text: str) -> list:
     return recs
 
 
+def _calc_match_score(query: str, name: str, location: str, description: str) -> int:
+    """Calculate match score based on keyword overlap between query and destination."""
+    score = 60
+    ql = query.lower()
+    dl = f"{name} {location} {description}".lower()
+
+    # Keyword matches
+    keywords = {
+        "family": ["family", "kids", "children"],
+        "cool": ["cool", "mountain", "alpine", "lake", "snow", "cold"],
+        "beach": ["beach", "coastal", "ocean", "sea", "island", "tropical"],
+        "photo": ["photo", "scenic", "views", "picturesque", "photography"],
+        "hiking": ["hike", "hiking", "trail", "trek", "walk"],
+        "history": ["historic", "ancient", "temple", "heritage", "ruins", "museum"],
+        "city": ["city", "urban", "downtown", "nightlife"],
+        "nature": ["nature", "park", "forest", "wildlife", "garden"],
+        "budget": ["budget", "cheap", "affordable"],
+        "romantic": ["romantic", "couples", "honeymoon"],
+    }
+
+    for category, words in keywords.items():
+        if any(w in ql for w in words):
+            if any(w in dl for w in words):
+                score += 8
+
+    return min(score, 95)
+
+
+def _estimate_cost(location: str) -> dict:
+    """Estimate cost based on location."""
+    loc = location.lower()
+
+    if any(x in loc for x in ["thailand", "vietnam", "cambodia", "laos", "myanmar", "india", "nepal", "indonesia"]):
+        return {"min": 300, "max": 800}
+    if any(x in loc for x in ["japan", "south korea", "taiwan", "malaysia", "philippines"]):
+        return {"min": 600, "max": 1500}
+    if any(x in loc for x in ["france", "italy", "spain", "germany", "uk", "england", "portugal", "greece", "europe"]):
+        return {"min": 800, "max": 2500}
+    if any(x in loc for x in ["usa", "united states", "canada", "new york", "california", "florida", "texas"]):
+        return {"min": 800, "max": 2500}
+    if any(x in loc for x in ["australia", "new zealand"]):
+        return {"min": 1000, "max": 3000}
+    if any(x in loc for x in ["africa", "kenya", "tanzania", "south africa", "morocco"]):
+        return {"min": 600, "max": 1800}
+    if any(x in loc for x in ["brazil", "argentina", "mexico", "peru", "colombia"]):
+        return {"min": 500, "max": 1500}
+    return {"min": 500, "max": 2000}
+
+
 class TravelMindAI(gl.Contract):
     saved_trips: TreeMap[str, str]
     saved_recommendations: TreeMap[str, str]
@@ -200,20 +249,35 @@ class TravelMindAI(gl.Contract):
         for r in recs[:limit]:
             if not isinstance(r, dict):
                 continue
+            name = str(r.get("name", "Unknown"))
+            location = str(r.get("location", "Unknown"))
+            description = str(r.get("description", ""))
+
+            # Calculate match_score if default (75) or missing
+            ms = int(r.get("match_score", 75))
+            if ms == 75:
+                ms = _calc_match_score(query, name, location, description)
+
+            # Estimate cost if default (500-2000) or missing
             est = r.get("estimated_cost", {})
             if isinstance(est, dict):
-                cost_min = est.get("min", 0)
-                cost_max = est.get("max", 0)
+                cost_min = int(est.get("min", 0))
+                cost_max = int(est.get("max", 0))
             else:
                 cost_min = 0
                 cost_max = 0
+            if cost_min == 500 and cost_max == 2000:
+                est = _estimate_cost(location)
+                cost_min = est["min"]
+                cost_max = est["max"]
+
             clean_recs.append({
-                "name": str(r.get("name", "Unknown")),
-                "location": str(r.get("location", "Unknown")),
-                "description": str(r.get("description", "")),
-                "match_score": int(r.get("match_score", 75)),
+                "name": name,
+                "location": location,
+                "description": description,
+                "match_score": ms,
                 "best_season": str(r.get("best_season", "Year-round")),
-                "estimated_cost": {"min": int(cost_min), "max": int(cost_max)},
+                "estimated_cost": {"min": cost_min, "max": cost_max},
             })
 
         out = json.dumps({

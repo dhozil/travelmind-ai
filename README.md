@@ -30,7 +30,7 @@ Every recommendation, itinerary, travel match, and hidden gem finding goes throu
 | Language | TypeScript |
 | Styling | Tailwind CSS, shadcn/ui |
 | Smart Contract | Python (GenLayer Intelligent Contract) |
-| Blockchain | GenLayer Studionet (chain ID 61999) |
+| Blockchain | GenLayer Testnet Bradbury (chain ID 4221) |
 | SDK | genlayer-js |
 | Wallet | MetaMask + GenLayer Snap |
 | Database | Supabase (Postgres for destination catalog) |
@@ -66,7 +66,7 @@ All AI methods follow the PatchworkTruth pattern:
 - Node.js 20+
 - MetaMask browser extension
 - GenLayer Snap installed (auto-installed on first `connectWallet`)
-- Some Studionet GEN tokens (use the [Studio faucet](https://studio.genlayer.com))
+- Some Bradbury GEN tokens (use the [testnet faucet](https://testnet-faucet.genlayer.foundation))
 
 ### Setup
 
@@ -81,7 +81,7 @@ npm install
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://txabofbwpyojtusvcbrp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
-NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+NEXT_PUBLIC_GENLAYER_RPC_URL=https://rpc-bradbury.genlayer.com
 NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0xd6BEe3c5Fe046e3361eb98690b9829e18CB95E3F
 ```
 
@@ -97,11 +97,12 @@ Open `http://localhost:3000`, connect your wallet (header → Connect Wallet), a
 
 ## Deploying the Contract
 
-1. Open [studio.genlayer.com](https://studio.genlayer.com)
-2. Paste `contracts/TravelMindAI.py`
-3. Click **Get Schema** to verify the contract parses
-4. Click **Deploy**, copy the printed address
-5. Update `NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS` in `.env`
+1. Open [GenLayer Studio](https://studio.genlayer.com) or use GenLayer CLI
+2. Set network: `genlayer network testnet-bradbury`
+3. Paste `contracts/TravelMindAI.py`
+4. Click **Get Schema** to verify the contract parses
+5. Click **Deploy**, copy the printed address
+6. Update `NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS` in `.env`
 
 ---
 

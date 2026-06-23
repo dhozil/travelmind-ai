@@ -1,5 +1,5 @@
 import { createClient } from 'genlayer-js';
-import { studionet } from 'genlayer-js/chains';
+import { testnetBradbury } from 'genlayer-js/chains';
 import { TransactionStatus } from 'genlayer-js/types';
 
 type Eth = {
@@ -24,7 +24,7 @@ let readonlyClient: ReturnType<typeof createClient> | null = null;
 
 function getReadonlyClient() {
   if (readonlyClient) return readonlyClient;
-  readonlyClient = createClient({ chain: studionet });
+  readonlyClient = createClient({ chain: testnetBradbury });
   return readonlyClient;
 }
 
@@ -134,7 +134,7 @@ let connectedOnce = false;
 
 function buildWalletClient(addr: `0x${string}`) {
   if (walletClient && walletAddress === addr) return walletClient;
-  walletClient = createClient({ chain: studionet, account: addr });
+  walletClient = createClient({ chain: testnetBradbury, account: addr });
   walletAddress = addr;
   connectedOnce = false;
   return walletClient;
@@ -148,7 +148,7 @@ export async function connectWallet(): Promise<`0x${string}`> {
   saveStoredAddress(addr);
   const client = buildWalletClient(addr);
   try {
-    await (client as any).connect('studionet');
+    await (client as any).connect('testnet-bradbury');
     connectedOnce = true;
   } catch (e) {
     console.warn('[GenLayer] Snap connection failed, will retry before write:', e);
@@ -167,7 +167,7 @@ async function ensureConnected(addr: `0x${string}`) {
   if (connectedOnce && walletAddress === addr) return;
   const client = buildWalletClient(addr);
   try {
-    await (client as any).connect('studionet');
+    await (client as any).connect('testnet-bradbury');
     connectedOnce = true;
   } catch (e) {
     console.warn('[GenLayer] Snap reconnect failed, proceeding with write:', e);

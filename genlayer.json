@@ -32,7 +32,7 @@
     "wallet_integration": "genlayer-js"
   },
   "deployment": {
-    "network": "studionet",
+  "network": "testnet-bradbury",
     "gas_limit": 5000000,
     "confirmations": 2
   }

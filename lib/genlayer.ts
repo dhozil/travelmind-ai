@@ -196,7 +196,7 @@ async function writeAndWait(method: string, args: any[]): Promise<void> {
   });
 }
 
-// ── AI helpers: writeContract (MetaMask consensus) → poll view method ──
+// ── AI helpers: submit tx, then poll view method until result appears ──
 
 async function writeThenPoll(
   writeMethod: string, writeArgs: any[],
@@ -207,7 +207,7 @@ async function writeThenPoll(
   await ensureConnected(addr);
   const client = buildWalletClient(addr);
 
-  // Submit — MetaMask signs, consensus runs, state persisted
+  // Submit — MetaMask signs, tx goes to consensus
   const writeResult: any = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: writeMethod,
@@ -217,36 +217,20 @@ async function writeThenPoll(
 
   const hash = typeof writeResult === 'string' ? writeResult : writeResult?.hash;
 
-  // Poll transaction status until consensus_data is available
-  const pollIntervalMs = 10000; // 10 seconds
+  // Poll the view method (TreeMap) until consensus updates it
+  // Bradbury consensus takes ~20-30 minutes
+  const pollIntervalMs = 10000;
 
   for (let attempt = 1; attempt <= 180; attempt++) {
-    try {
-      const tx: any = await (client as any).getTransaction({ hash });
-
-      // Check if result is available (leader_receipt with readable payload)
-      const lr = tx?.consensus_data?.leader_receipt?.[0];
-      if (lr) {
-        const raw = lr?.result?.payload?.readable || lr?.eq_outputs?.['0']?.payload?.readable;
-        if (raw && typeof raw === 'string') {
-          const p = JSON.parse(raw);
-          const result = typeof p === 'string' ? JSON.parse(p) : p;
-          if (result) return result;
+    for (const variant of [addr, addr.toLowerCase()]) {
+      try {
+        const stored = await callView(viewMethod, [variant]);
+        const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
+        if (str && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
+          return stored;
         }
-      }
-
-      // Also try view method (TreeMap) - might be updated by now
-      for (const variant of [addr, addr.toLowerCase()]) {
-        try {
-          const stored = await callView(viewMethod, [variant]);
-          const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
-          if (str && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
-            return stored;
-          }
-        } catch { /* try next */ }
-      }
-    } catch { /* retry */ }
-
+      } catch { /* try next variant */ }
+    }
     await new Promise(r => setTimeout(r, pollIntervalMs));
   }
 

@@ -2,47 +2,53 @@
 
 from genlayer import *
 import json
+import re as regex_mod
 
 
-def _fix_json(s):
-    """Fix malformed JSON from AI validators: missing commas, trailing commas."""
-    import re
-    # Add missing commas between key-value pairs: "val""key" -> "val","key"
-    s = re.sub(r'"([^"]*)"(\s*)"', r'"\1", "\2"', s, flags=re.DOTALL)
-    # Add missing comma after value before next key: "val"  "key" -> "val", "key"
-    s = re.sub(r'("[^"]*")(\s+)(?=")', r'\1,\2', s)
-    # Remove trailing commas before } or ]
-    s = re.sub(r',\s*([}\]])', r'\1', s)
+def _clean_json(text: str) -> str:
+    """Remove markdown code fences from LLM output."""
+    backticks = "``" + "`"
+    text = text.replace(backticks + "json", "").replace(backticks, "")
+    return text.strip()
+
+
+def _extract_json(text: str) -> dict:
+    """Best-effort JSON extraction from LLM output."""
+    text = _clean_json(text)
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    match = regex_mod.search(r"\{[\s\S]*\}", text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return {}
+
+
+def _fix_json(s: str) -> str:
+    """Fix malformed JSON: missing commas, trailing commas."""
+    s = regex_mod.sub(r'"([^"]*)"(\s*)"', r'"\1", "\2"', s, flags=regex_mod.DOTALL)
+    s = regex_mod.sub(r'("[^"]*")(\s+)(?=")', r'\1,\2', s)
+    s = regex_mod.sub(r',\s*([}\]])', r'\1', s)
     return s
 
 
-def _to_dict(raw):
-    """Convert prompt_comparative result to dict.
-    Handles: dict (pass-through), str (strip code fences + parse JSON).
-    """
+def _safe_json(raw) -> dict:
+    """Parse JSON from dict or str, with fix fallback."""
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str):
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            first_nl = cleaned.find("\n")
-            if first_nl != -1:
-                cleaned = cleaned[first_nl + 1:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-        try:
-            return json.loads(cleaned)
-        except Exception:
-            pass
-        cleaned = _fix_json(cleaned)
-        try:
-            return json.loads(cleaned)
-        except Exception:
-            pass
-        cleaned = cleaned.replace(",}", "}").replace(",]", "]")
-        return json.loads(cleaned)
-    raise gl.vm.UserError("LLM did not return dict or string")
+        result = _extract_json(raw)
+        if result:
+            return result
+        fixed = _fix_json(raw)
+        result = _extract_json(fixed)
+        if result:
+            return result
+    return {}
 
 
 class TravelMindAI(gl.Contract):
@@ -68,8 +74,8 @@ class TravelMindAI(gl.Contract):
     def recommend(self, query: str, max_results: bigint = 5) -> str:
         limit = int(max_results) if max_results > 0 else 5
 
-        def do_all() -> str:
-            return gl.nondet.exec_prompt(
+        def build_prompt() -> str:
+            return (
                 f"You are a travel expert. User query: \"{query}\"\n"
                 f"Generate exactly {limit} destination recommendations.\n"
                 "Return ONLY valid JSON with exactly 2 keys:\n"
@@ -78,16 +84,32 @@ class TravelMindAI(gl.Contract):
                 f"2. \"recommendations\": array of exactly {limit} objects, each with: "
                 "name, location, description (1-2 sentences), match_score (int 0-100), "
                 "best_season, estimated_cost {min, max} in USD\n"
-                "Sort recommendations by match_score descending.",
-                response_format="json",
+                "Sort recommendations by match_score descending."
             )
 
-        raw = gl.eq_principle.prompt_comparative(
-            do_all,
-            "Both outputs must be valid JSON with exactly 2 keys: 'preferences' (dict) and "
-            "'recommendations' (array of destination objects). Values may differ slightly.",
-        )
-        data = _to_dict(raw)
+        def leader_fn() -> dict:
+            p = build_prompt()
+            res = gl.nondet.exec_prompt(p, response_format="json")
+            if isinstance(res, dict):
+                return res
+            return {"preferences": {}, "recommendations": []}
+
+        def validator_fn(leader: gl.vm.Result) -> bool:
+            if not isinstance(leader, gl.vm.Return):
+                return False
+            mine = leader_fn()
+            l_recs = len(leader.calldata.get("recommendations", []))
+            v_recs = len(mine.get("recommendations", []))
+            if abs(l_recs - v_recs) > 2:
+                return False
+            l_prefs = leader.calldata.get("preferences", {})
+            v_prefs = mine.get("preferences", {})
+            if type(l_prefs) != type(v_prefs):
+                return False
+            return True
+
+        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        data = _safe_json(raw) if not isinstance(raw, dict) else raw
         prefs = data.get("preferences", {}) if isinstance(data, dict) else {}
         recs = data.get("recommendations", []) if isinstance(data, dict) else []
         if not isinstance(recs, list):
@@ -110,23 +132,49 @@ class TravelMindAI(gl.Contract):
         self, destination: str, days: bigint,
         budget: bigint, travelers: bigint, preferences: str,
     ) -> str:
-        def plan_all() -> str:
-            return gl.nondet.exec_prompt(
+        def build_prompt() -> str:
+            return (
                 f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}. "
-                "Return JSON: [{day:1, title:'...', highlights:['...'], cost:0}]",
-                response_format="json",
+                "Return ONLY valid JSON: "
+                "[{\"day\":1,\"title\":\"...\",\"highlights\":[\"...\"],\"cost\":0}]"
             )
 
-        raw = gl.eq_principle.prompt_comparative(
-            plan_all,
-            "Both are valid responses.",
-        )
-        daily_plans = _to_dict(raw)
+        def leader_fn() -> dict:
+            p = build_prompt()
+            res = gl.nondet.exec_prompt(p, response_format="json")
+            if isinstance(res, dict):
+                return res
+            if isinstance(res, list):
+                return {"daily_plans": res}
+            return {"daily_plans": []}
+
+        def validator_fn(leader: gl.vm.Result) -> bool:
+            if not isinstance(leader, gl.vm.Return):
+                return False
+            mine = leader_fn()
+            l_plans = leader.calldata.get("daily_plans", leader.calldata if isinstance(leader.calldata, list) else [])
+            v_plans = mine.get("daily_plans", [])
+            if not isinstance(l_plans, list):
+                l_plans = []
+            if not isinstance(v_plans, list):
+                v_plans = []
+            if abs(len(l_plans) - len(v_plans)) > 1:
+                return False
+            return True
+
+        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        
+        # Parse result
+        if isinstance(raw, dict):
+            daily_plans = raw.get("daily_plans", [])
+        elif isinstance(raw, list):
+            daily_plans = raw
+        else:
+            daily_plans = []
         
         # Normalize to flat list of day objects
         flat = []
         if isinstance(daily_plans, dict):
-            # Check for nested arrays: plan, itinerary, days, items
             for key in ["plan", "itinerary", "days", "items"]:
                 if key in daily_plans and isinstance(daily_plans[key], list):
                     flat = daily_plans[key]
@@ -147,17 +195,16 @@ class TravelMindAI(gl.Contract):
                 elif isinstance(item, list):
                     flat.extend(item)
         
-        daily_plans = flat
         total_cost = sum(
             p.get("total_cost", p.get("cost", 0))
-            for p in daily_plans
+            for p in flat
             if isinstance(p, dict)
         )
 
         result = json.dumps({
             "destination": destination,
             "total_days": int(days),
-            "daily_plans": daily_plans[:int(days)],
+            "daily_plans": flat[:int(days)],
             "total_cost": total_cost,
         })
         self.last_itinerary[str(gl.message.sender_address)] = result
@@ -169,26 +216,38 @@ class TravelMindAI(gl.Contract):
 
     @gl.public.write
     def match_by_image(self, image_hash: str, caption: str, max_results: bigint = 5) -> str:
-        def analyze_and_find() -> str:
-            return gl.nondet.exec_prompt(
+        def build_prompt() -> str:
+            return (
                 f"Analyze this travel vibe and find matching destinations.\n"
                 f"Image hash: {image_hash}, User caption: \"{caption}\"\n"
                 "Return ONLY valid JSON with exactly 2 keys:\n"
-                "1. \"image_analysis\": {{landscape_type, atmosphere, dominant_colors[], "
-                "natural_elements[], human_activity_level 0-100, vibe_summary}}\n"
-                f"2. \"matches\": array of exactly {int(max_results)} destinations, "
-                "each with: name, location, why_match, match_score 0-100, "
-                "estimated_cost {{min,max}}, image_vibe_match 0-100, description.\n"
-                "Sorted by match_score descending.",
-                response_format="json",
+                "1. \"image_analysis\": {\"landscape_type\":\"...\",\"atmosphere\":\"...\","
+                "\"dominant_colors\":[],\"natural_elements\":[],"
+                "\"human_activity_level\":50,\"vibe_summary\":\"...\"}\n"
+                f"2. \"matches\": array of {int(max_results)} destinations, each with: "
+                "name, location, why_match, match_score (0-100), "
+                "estimated_cost {min,max}, image_vibe_match (0-100), description."
             )
 
-        raw = gl.eq_principle.prompt_comparative(
-            analyze_and_find,
-            "Both outputs must be valid JSON with 'image_analysis' and 'matches'. "
-            "The contract uses the first result.",
-        )
-        data = _to_dict(raw)
+        def leader_fn() -> dict:
+            p = build_prompt()
+            res = gl.nondet.exec_prompt(p, response_format="json")
+            if isinstance(res, dict):
+                return res
+            return {"image_analysis": {}, "matches": []}
+
+        def validator_fn(leader: gl.vm.Result) -> bool:
+            if not isinstance(leader, gl.vm.Return):
+                return False
+            mine = leader_fn()
+            l_matches = len(leader.calldata.get("matches", []))
+            v_matches = len(mine.get("matches", []))
+            if abs(l_matches - v_matches) > 2:
+                return False
+            return True
+
+        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        data = _safe_json(raw) if not isinstance(raw, dict) else raw
         result = json.dumps({
             "image_analysis": data.get("image_analysis", {}),
             "matches": data.get("matches", [])[:int(max_results)],
@@ -205,31 +264,53 @@ class TravelMindAI(gl.Contract):
         self, preferences: str,
         budget_max: bigint = 0, category: str = "any", max_results: bigint = 10,
     ) -> str:
-        def discover_and_verify() -> str:
-            return gl.nondet.exec_prompt(
+        def build_prompt() -> str:
+            return (
                 f"Find {int(max_results)} hidden gem destinations.\n"
                 f"Query: \"{preferences}\"\n"
                 f"Max budget: ${int(budget_max)}, Category: {category}\n"
                 "Hidden = not widely known, authentic, minimal commercial tourism.\n"
-                "For each gem, self-verify: assess popularity, tourist traffic, authenticity, "
-                "social media presence, infrastructure.\n"
-                "Return ONLY a JSON array. Each element:\n"
-                "  name, location, description, hidden_score 0-100, "
-                "estimated_cost {{min,max}} USD, why_hidden, best_season, tags[], "
-                "authenticity_rating 0-100, comparable_popular_spot, "
-                "verification: {{is_hidden bool, confidence 0-100, reasons[], why_authentic}}.\n"
-                "Sorted by hidden_score descending.",
-                response_format="json",
+                "Return ONLY valid JSON array. Each element:\n"
+                "  name, location, description, hidden_score (0-100), "
+                "estimated_cost {min,max} USD, why_hidden, best_season, tags [], "
+                "authenticity_rating (0-100), comparable_popular_spot."
             )
 
-        raw = gl.eq_principle.prompt_comparative(
-            discover_and_verify,
-            "Both outputs must be valid JSON arrays with the same structure. "
-            "The contract uses the first result.",
-        )
-        gems = _to_dict(raw)
+        def leader_fn() -> dict:
+            p = build_prompt()
+            res = gl.nondet.exec_prompt(p, response_format="json")
+            if isinstance(res, list):
+                return {"hidden_gems": res}
+            if isinstance(res, dict):
+                return res
+            return {"hidden_gems": []}
+
+        def validator_fn(leader: gl.vm.Result) -> bool:
+            if not isinstance(leader, gl.vm.Return):
+                return False
+            mine = leader_fn()
+            l_gems = leader.calldata.get("hidden_gems", leader.calldata if isinstance(leader.calldata, list) else [])
+            v_gems = mine.get("hidden_gems", [])
+            if not isinstance(l_gems, list):
+                l_gems = []
+            if not isinstance(v_gems, list):
+                v_gems = []
+            if abs(len(l_gems) - len(v_gems)) > 3:
+                return False
+            return True
+
+        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        
+        if isinstance(raw, dict):
+            gems = raw.get("hidden_gems", [])
+        elif isinstance(raw, list):
+            gems = raw
+        else:
+            gems = []
+        
         if isinstance(gems, dict):
             gems = [gems]
+        
         result = json.dumps({"hidden_gems": gems[:int(max_results)]})
         self.last_gems[str(gl.message.sender_address)] = result
         return result

@@ -134,22 +134,36 @@ export default function RecommendationPage() {
     const preferences: string[] = [];
     let genLayerRecs: any[] | null = null;
 
-    // ── Step 1: Preference Analysis ──
+    // ── Step 1: Submit to GenLayer + wait for consensus ──
     if (useGenLayer) {
+      setAnalyzedPreferences(['Submitting to GenLayer Bradbury...']);
+      setStep(2);
+      setConsensusPhase('submitting');
+
       try {
+        setConsensusPhase('validating');
         const genResult = await getRecommendation(query);
         genLayerRecs = (genResult?.recommendations) || [];
         const prefs = genResult?.preferences || {};
         const prefEntries = Object.entries(prefs);
+        setConsensusPhase('comparing');
+
+        setAnalyzedPreferences([]);
         for (const [k, v] of prefEntries) {
-          await new Promise((r) => setTimeout(r, 200));
+          await new Promise((r) => setTimeout(r, 100));
           setAnalyzedPreferences((prev) => [...prev, `${k}: ${v}`]);
         }
         if (prefEntries.length === 0) {
           setAnalyzedPreferences(['Preferences analyzed by GenLayer validators']);
         }
+
+        setConsensusPhase('complete');
+        setConsensusReached(true);
+        await new Promise((r) => setTimeout(r, 400));
       } catch (e) {
-        console.warn('GenLayer failed, using local analysis:', e);
+        console.warn('GenLayer failed:', e);
+        setAnalyzedPreferences(['GenLayer tx failed — using local analysis']);
+        setConsensusPhase('idle');
       }
     }
 
@@ -164,25 +178,15 @@ export default function RecommendationPage() {
     if (!useGenLayer) {
       if (preferences.length === 0) preferences.push('Analyzing preferences...');
       setAnalyzedPreferences([]);
+      setStep(2);
+      setConsensusPhase('submitting');
       for (const p of preferences) {
         await new Promise((r) => setTimeout(r, 300));
         setAnalyzedPreferences((prev) => [...prev, p]);
       }
+      setConsensusPhase('complete');
+      setConsensusReached(true);
     }
-
-    await new Promise((r) => setTimeout(r, 400));
-    setStep(2);
-
-    // ── Step 2: Animated consensus visualization ──
-    setConsensusPhase('submitting');
-    await new Promise((r) => setTimeout(r, 600));
-    setConsensusPhase('validating');
-    await new Promise((r) => setTimeout(r, 800));
-    setConsensusPhase('comparing');
-    await new Promise((r) => setTimeout(r, 700));
-    setConsensusPhase('complete');
-    setConsensusReached(true);
-    await new Promise((r) => setTimeout(r, 500));
 
     setStep(3);
 

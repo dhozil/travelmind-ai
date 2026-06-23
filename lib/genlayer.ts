@@ -208,14 +208,12 @@ async function writeThenPoll(
   const client = buildWalletClient(addr);
 
   // Submit — MetaMask signs, tx goes to consensus
-  const writeResult: any = await client.writeContract({
+  await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: writeMethod,
     args: writeArgs as never[],
     value: BigInt(0),
   });
-
-  const hash = typeof writeResult === 'string' ? writeResult : writeResult?.hash;
 
   // Poll the view method (TreeMap) until consensus updates it
   // Bradbury consensus takes ~20-30 minutes

@@ -109,16 +109,11 @@ class TravelMindAI(gl.Contract):
 
         def build_prompt() -> str:
             return (
-                f"You are a travel expert. User query: \"{query}\"\n"
-                f"Generate exactly {limit} destination recommendations.\n"
-                "You MUST return valid JSON. No markdown, no code fences.\n"
-                "Format: {\"preferences\":{...},\"recommendations\":[...]}\n"
-                "preferences keys: destination_type, budget_min, budget_max, "
-                "duration_days, group_type, activities (array of 3-5 strings)\n"
-                f"recommendations: array of {limit} objects with: "
-                "name, location, description (1-2 sentences), match_score (int 0-100), "
-                "best_season, estimated_cost {min, max} in USD\n"
-                "Sort by match_score descending."
+                "You are a travel expert. Respond ONLY with valid JSON.\n"
+                f"User wants: {query}\n"
+                f"Return exactly {limit} destinations.\n\n"
+                '{"preferences":{"destination_type":"...","budget_min":0,"budget_max":0,"duration_days":0,"group_type":"...","activities":["..."]},"recommendations":[{"name":"...","location":"...","description":"...","match_score":0,"best_season":"...","estimated_cost":{"min":0,"max":0}}]}\n\n'
+                "IMPORTANT: Output ONLY the JSON object. No text before or after."
             )
 
         def leader_fn() -> dict:
@@ -167,9 +162,11 @@ class TravelMindAI(gl.Contract):
     ) -> str:
         def build_prompt() -> str:
             return (
-                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}.\n"
-                "You MUST return valid JSON. No markdown, no code fences.\n"
-                "Format: [{\"day\":1,\"title\":\"...\",\"highlights\":[\"...\"],\"cost\":0}]"
+                "You are a travel planner. Respond ONLY with valid JSON.\n"
+                f"Plan {int(days)} days in {destination}.\n"
+                f"Budget: ${int(budget)}. Style: {preferences}\n\n"
+                '{"daily_plans":[{"day":1,"title":"...","highlights":["..."],"cost":0}]}\n\n'
+                "IMPORTANT: Output ONLY the JSON object. No text before or after."
             )
 
         def leader_fn() -> dict:
@@ -251,15 +248,11 @@ class TravelMindAI(gl.Contract):
     def match_by_image(self, image_hash: str, caption: str, max_results: bigint = 5) -> str:
         def build_prompt() -> str:
             return (
-                f"Analyze this travel vibe and find matching destinations.\n"
-                f"Image hash: {image_hash}, User caption: \"{caption}\"\n"
-                "You MUST return valid JSON. No markdown, no code fences.\n"
-                "Format: {\"image_analysis\":{...},\"matches\":[...]}\n"
-                "image_analysis keys: landscape_type, atmosphere, dominant_colors, "
-                "natural_elements, human_activity_level (0-100), vibe_summary\n"
-                f"matches: array of {int(max_results)} destinations with: "
-                "name, location, why_match, match_score (0-100), "
-                "estimated_cost {min,max}, image_vibe_match (0-100), description."
+                "You are a travel vibe analyzer. Respond ONLY with valid JSON.\n"
+                f"Caption: {caption}\n"
+                f"Find {int(max_results)} matching destinations.\n\n"
+                '{"image_analysis":{"landscape_type":"...","atmosphere":"...","vibe_summary":"..."},"matches":[{"name":"...","location":"...","match_score":0,"description":"..."}]}\n\n'
+                "IMPORTANT: Output ONLY the JSON object. No text before or after."
             )
 
         def leader_fn() -> dict:
@@ -299,15 +292,11 @@ class TravelMindAI(gl.Contract):
     ) -> str:
         def build_prompt() -> str:
             return (
-                f"Find {int(max_results)} hidden gem destinations.\n"
-                f"Query: \"{preferences}\"\n"
-                f"Max budget: ${int(budget_max)}, Category: {category}\n"
-                "Hidden = not widely known, authentic, minimal commercial tourism.\n"
-                "You MUST return valid JSON. No markdown, no code fences.\n"
-                "Format: [{\"name\":\"...\",\"location\":\"...\",\"description\":\"...\","
-                "\"hidden_score\":0-100,\"estimated_cost\":{\"min\":0,\"max\":0},"
-                "\"why_hidden\":\"...\",\"best_season\":\"...\",\"tags\":[],"
-                "\"authenticity_rating\":0-100,\"comparable_popular_spot\":\"...\"}]"
+                "You are a hidden gem travel finder. Respond ONLY with valid JSON.\n"
+                f"Find {int(max_results)} hidden gems for: {preferences}\n"
+                f"Budget: ${int(budget_max)}, Category: {category}\n\n"
+                '{"hidden_gems":[{"name":"...","location":"...","description":"...","hidden_score":0,"estimated_cost":{"min":0,"max":0},"best_season":"..."}]}\n\n'
+                "IMPORTANT: Output ONLY the JSON object. No text before or after."
             )
 
         def leader_fn() -> dict:

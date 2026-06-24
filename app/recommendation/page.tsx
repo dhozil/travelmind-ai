@@ -134,15 +134,15 @@ export default function RecommendationPage() {
     const preferences: string[] = [];
     let genLayerRecs: any[] | null = null;
 
-    // ── Step 1: Submit to GenLayer + wait for consensus ──
+    // ── Step 1: Submit to GenLayer + poll for consensus result ──
     if (useGenLayer) {
-      setAnalyzedPreferences(['Submitting to GenLayer Bradbury...']);
       setStep(2);
       setConsensusPhase('submitting');
+      setAnalyzedPreferences(['Submitting to GenLayer Bradbury...']);
 
       try {
         setConsensusPhase('validating');
-        setAnalyzedPreferences(['Waiting for validator consensus (20-30 minutes)...']);
+        setAnalyzedPreferences(['Waiting for validator consensus...']);
         const genResult = await getRecommendation(query);
         genLayerRecs = (genResult?.recommendations) || [];
         const prefs = genResult?.preferences || {};

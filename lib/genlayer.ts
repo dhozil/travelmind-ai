@@ -1,6 +1,7 @@
 import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
-import { TransactionStatus } from 'genlayer-js/types';
+import { TransactionStatus, TransactionHashVariant } from 'genlayer-js/types';
+import { getAddress } from 'viem';
 
 type Eth = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -48,12 +49,21 @@ function unwrapResult(val: unknown): unknown {
 async function callView(method: string, args: any[]): Promise<unknown> {
   if (!CONTRACT_ADDRESS) throw new Error('Contract address not configured');
   const client = getReadonlyClient();
-  const raw = await client.readContract({
-    address: CONTRACT_ADDRESS,
-    functionName: method,
-    args,
-  });
-  return unwrapResult(raw);
+  // Try latest-nonfinal first (accepted state), fall back to latest-final
+  const variants = [TransactionHashVariant.LATEST_NONFINAL, TransactionHashVariant.LATEST_FINAL];
+  for (const v of variants) {
+    const raw = await client.readContract({
+      address: CONTRACT_ADDRESS,
+      functionName: method,
+      args,
+      transactionHashVariant: v,
+      jsonSafeReturn: false,
+    });
+    if (typeof raw === 'string' && raw.length > 2) {
+      try { return JSON.parse(raw); } catch { return raw; }
+    }
+  }
+  return null;
 }
 
 async function simulateWrite(method: string, args: any[]): Promise<unknown> {
@@ -78,9 +88,7 @@ async function pollView(method: string, args: any[], maxAttempts = 120, baseInte
       if (!isEmpty) {
         return result;
       }
-    } catch {
-      // retry
-    }
+    } catch (e: any) { if (attempt <= 2) console.warn('[GenLayer] pollView callView error:', e?.message || e); }
     const waitMs = Math.min(baseIntervalMs * (1 + attempt * 0.5), 15000);
     await new Promise(r => setTimeout(r, waitMs));
   }
@@ -176,7 +184,7 @@ async function ensureConnected(addr: `0x${string}`) {
 
 // ── Write + wait (signed via MetaMask) ────────────────────────────
 
-async function writeAndWait(method: string, args: any[]): Promise<void> {
+async function writeAndWait(method: string, args: any[]): Promise<string> {
   if (!CONTRACT_ADDRESS) throw new Error('Contract address not configured');
   const addr = loadStoredAddress();
   if (!addr) throw new WalletNotConnectedError();
@@ -194,9 +202,10 @@ async function writeAndWait(method: string, args: any[]): Promise<void> {
     retries: 200,
     interval: 2000,
   });
+  return hash;
 }
 
-// ── AI helpers: submit tx, poll receipt until result appears ──
+// ── AI helpers: submit tx, poll view method until result appears ──
 
 async function writeThenPoll(
   writeMethod: string, writeArgs: any[],
@@ -207,95 +216,60 @@ async function writeThenPoll(
   await ensureConnected(addr);
   const client = buildWalletClient(addr);
 
-  // Submit — MetaMask signs, tx goes to consensus
-  const writeResult: any = await client.writeContract({
+  // Build unique address formats to try
+  const addrVariants: string[] = [addr];
+  try { addrVariants.push(getAddress(addr)); } catch {}
+  const lower = addr.toLowerCase();
+  if (!addrVariants.includes(lower)) addrVariants.push(lower);
+
+  // 1. Submit transaction
+  console.log('[GenLayer] submitting tx...');
+  const hash = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: writeMethod,
     args: writeArgs as never[],
     value: BigInt(0),
   });
+  console.log('[GenLayer] tx hash:', hash);
 
-  const hash = typeof writeResult === 'string' ? writeResult : writeResult?.hash;
+  // 2. WAIT until tx is ACCEPTED — proven pattern from all working GenLayer dApps
+  console.log('[GenLayer] waiting for tx acceptance...');
+  await client.waitForTransactionReceipt({
+    hash,
+    status: TransactionStatus.ACCEPTED,
+    retries: 200,
+    interval: 2000,
+  });
+  console.log('[GenLayer] tx accepted!');
 
-  const eth = (window as any).ethereum;
+  // 3. Read data immediately after acceptance
+  const trimmedPreview = (s: string) => s.substring(0, 16) + '...';
+  for (const variant of addrVariants) {
+    try {
+      const stored = await callView(viewMethod, [variant]);
+      const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
+      const isEmpty = !str || str === 'null' || str === 'undefined' || str === '{}' || str.trim() === '' || str === '""';
+      console.log(`[GenLayer] read variant=${trimmedPreview(variant)} len=${str.length} empty=${isEmpty}`);
+      if (!isEmpty) return stored;
+    } catch (e: any) { console.warn(`[GenLayer] read variant=${trimmedPreview(variant)} ERROR:`, e?.message || e); }
+  }
 
-  // Poll tx receipt via eth_getTransactionReceipt
-  // Also try eth_call for view method
-  const pollIntervalMs = 10000;
-
-  for (let attempt = 1; attempt <= 180; attempt++) {
-    // Path 1: eth_getTransactionReceipt — get raw receipt with return data
-    if (eth) {
-      try {
-        const receipt: any = await eth.request({
-          method: 'eth_getTransactionReceipt',
-          params: [hash],
-        });
-        if (receipt && receipt.status === '0x1') {
-          // Try to extract return value from receipt
-          const returnVal = extractReturnValue(receipt);
-          if (returnVal) return returnVal;
-        }
-      } catch { /* not available yet */ }
-    }
-
-    // Path 2: poll view method (TreeMap) — might work for some contracts
-    for (const variant of [addr, addr.toLowerCase()]) {
+  // 4. Fallback: short poll (race condition — storage may lag behind receipt)
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    for (const variant of addrVariants) {
       try {
         const stored = await callView(viewMethod, [variant]);
         const str = typeof stored === 'string' ? stored : JSON.stringify(stored ?? '');
-        if (str && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
+        if (str && str.length > 2 && str !== 'null' && str !== 'undefined' && str !== '{}' && str.trim() !== '' && str !== '""') {
+          console.log('[GenLayer] data found after fallback poll');
           return stored;
-        }
-      } catch { /* try next */ }
-    }
-
-    await new Promise(r => setTimeout(r, pollIntervalMs));
-  }
-
-  throw new Error('GenVM execution returned empty result.');
-}
-
-/** Try to extract return value from a GenLayer tx receipt */
-function extractReturnValue(receipt: any): any {
-  // Check various locations for the return value
-  const candidates = [
-    receipt?.result,
-    receipt?.output,
-    receipt?.returnValue,
-    receipt?.data,
-    receipt?.logs?.[0]?.data,
-  ];
-
-  for (const c of candidates) {
-    if (!c) continue;
-    const str = typeof c === 'string' ? c : JSON.stringify(c);
-    if (!str || str === '0x') continue;
-
-    // Try to parse as JSON
-    try { return JSON.parse(str); } catch {}
-
-    // Hex string — decode to UTF-8
-    if (typeof c === 'string' && /^0x[0-9a-f]+$/i.test(c)) {
-      try {
-        const hex = c.replace('0x', '');
-        const bytes = [];
-        for (let i = 0; i < hex.length; i += 2) {
-          bytes.push(parseInt(hex.substring(i, i + 2), 16));
-        }
-        const decoded = new TextDecoder().decode(new Uint8Array(bytes));
-        if (decoded && decoded.length > 5) {
-          try { return JSON.parse(decoded); } catch { return decoded; }
         }
       } catch {}
     }
-
-    // Plain string
-    if (str.length > 10) {
-      try { return JSON.parse(str); } catch { return str; }
-    }
   }
-  return null;
+
+  throw new Error('Transaction accepted but data not available in view method after polling.');
 }
 
 // ── 1. AI RECOMMENDATION ──────────────────────────────────────────

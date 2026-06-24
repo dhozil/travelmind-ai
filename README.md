@@ -7,10 +7,10 @@ AI-powered travel recommendation platform built on **GenLayer** Intelligent Cont
 ## How it works
 
 ```
-User prompt → GenLayer contract → AI validators (prompt_comparative) → consensus → result
+User prompt → GenLayer contract → AI leader/validators (run_nondet_unsafe) → consensus → result
 ```
 
-Every recommendation, itinerary, travel match, and hidden gem finding goes through GenLayer's `prompt_comparative` consensus mechanism. Multiple independent validators run the same prompt, and the contract reconciles their outputs. The transaction is signed via MetaMask (GenLayer Snap) and settled on Studionet.
+Every recommendation, itinerary, travel match, and hidden gem finding runs through a `run_nondet_unsafe` leader/validator pattern — a single `gl.nondet.exec_prompt` call inside an AI leader function, validated by a structural validator (`isinstance(leader, gl.vm.Return)`). The transaction is signed via MetaMask (GenLayer Snap) and settled on Bradbury testnet.
 
 ### Features
 
@@ -41,21 +41,21 @@ Every recommendation, itinerary, travel match, and hidden gem finding goes throu
 
 ### Contract (`contracts/TravelMindAI.py`)
 
-A single `gl.Contract` with five feature domains:
+A single `gl.Contract` with the following methods:
 
-- `@gl.public.write` — AI methods that require multi-validator consensus: `recommend`, `generate_itinerary`, `match_by_image`, `find_hidden_gems`
+- `@gl.public.write` — AI methods: `recommend`, `generate_itinerary`, `match_by_image`, `find_hidden_gems` (all use `run_nondet_unsafe` with `exec_prompt`)
 - `@gl.public.write` — Storage methods: `save_trip`, `save_recommendation`
-- `@gl.public.view` — Read methods: `get_trip`, `get_last_recommendation`, `get_stats`, etc.
+- `@gl.public.view` — Read methods: `get_last_recommendation`, `get_last_itinerary`, `get_last_match`, `get_last_gems`, `get_trip`, `get_recommendation`, `get_user_trips`, `get_user_recommendations`, `get_stats`
 
-All AI methods follow the PatchworkTruth pattern:
-1. One `gl.nondet.exec_prompt` wrapped in one `gl.eq_principle.prompt_comparative` (2 validators)
-2. Result stored in a `TreeMap[str, str]` keyed by sender address
-3. Frontend polls the corresponding `get_last_*` view method after the transaction is accepted
+All AI methods follow this pattern:
+1. `leader_fn` calls `gl.nondet.exec_prompt` once; `validator_fn` checks the result is a `gl.vm.Return`
+2. Results stored in a `TreeMap[str, str]` keyed by sender address (EIP-55 checksummed)
+3. Frontend submits via `writeContract`, waits for receipt (`waitForTransactionReceipt` with `ACCEPTED` status), then reads data via `callView`
 
 ### Frontend (`lib/genlayer.ts`)
 
-- **Reads** (`@gl.public.view`) — `readContract` via read-only client, no wallet needed
-- **Writes** (`@gl.public.write`) — `writeContract` signed by MetaMask, `waitForTransactionReceipt(ACCEPTED)`, then poll view getter
+- **Reads** (`@gl.public.view`) — `readContract` via read-only client (`callView`), no wallet needed. Tries `latest-nonfinal` first, falls back to `latest-final`.
+- **Writes** (`@gl.public.write`) — `writeContract` signed by MetaMask → `waitForTransactionReceipt(ACCEPTED)` → `callView` to read result
 
 ---
 
@@ -137,7 +137,7 @@ travelmind-ai/
 
 - **No fake data** — All stats, testimonials, and team content are real (from Supabase or the contract). No hallucinations.
 - **Simplified prompts** — Concise prompts reduce LLM response time and malformed JSON from validators.
-- **`_to_dict` with JSON repair** — Handles missing commas and trailing commas from AI validators using regex fix before parsing.
-- **Store-then-poll pattern** — AI methods store their result in a TreeMap before returning. The frontend polls a `@gl.public.view` getter after the transaction is accepted.
-- **`prompt_comparative` with lenient criteria** — Comparison criteria is kept minimal ("Both are valid responses") to avoid consensus failures from minor formatting differences.
+- **`_extract_json` / `_parse_recommendations`** — Handles malformed JSON and pipe-delimited output from validators using regex fallback and line-by-line parsing.
+- **Store-then-read pattern** — AI methods store their result in a TreeMap before returning. The frontend `waitForTransactionReceipt(ACCEPTED)` then reads via `callView`.
+- **`run_nondet_unsafe` with structural validator** — Leader runs `exec_prompt`; validator only checks the result type. This avoids consensus failures from minor formatting differences.
 - **No `simulateWriteContract`** — All writes go through real `writeContract` with MetaMask signing.

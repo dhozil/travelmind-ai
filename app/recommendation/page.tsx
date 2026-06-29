@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,21 +22,24 @@ import {
   Star,
   Zap,
   Globe,
-  Award,
+  Plane,
+  Compass,
+  Navigation,
 } from 'lucide-react';
-import { supabase, type Destination } from '@/lib/supabase';
-import { getRecommendation } from '@/lib/genlayer';
+import { supabase, type Destination, buildDestMap } from '@/lib/supabase';
+import { getRecommendation, saveRecommendationToChain } from '@/lib/genlayer';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import PlaneLoader from '@/components/ui/plane-loader';
 
 const fallbackImages = [
   'https://images.pexels.com/photos/2161467/pexels-photo-2161467.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1287460/pexels-photo-1287460.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3408744/pexels-photo-3408744.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/2387871/pexels-photo-2387871.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/1732289/pexels-photo-1732289.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/2090645/pexels-photo-2090645.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1005417/pexels-photo-1005417.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1898155/pexels-photo-1898155.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/3225516/pexels-photo-3225516.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/1486970/pexels-photo-1486970.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3614418/pexels-photo-3614418.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1167025/pexels-photo-1167025.jpeg?auto=compress&cs=tinysrgb&w=800',
 ];
@@ -63,10 +66,12 @@ export default function RecommendationPage() {
   const [step, setStep] = useState(0);
   const [results, setResults] = useState<Destination[]>([]);
   const [consensusReached, setConsensusReached] = useState(false);
-  const [consensusPhase, setConsensusPhase] = useState<'idle' | 'submitting' | 'validating' | 'comparing' | 'complete'>('idle');
+  const [consensusPhase, setConsensusPhase] = useState<'idle' | 'submitting' | 'validating' | 'comparing' | 'complete' | 'failed'>('idle');
   const [analyzedPreferences, setAnalyzedPreferences] = useState<string[]>([]);
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState<`0x${string}` | null>(null);
+  const [saving, setSaving] = useState(false);
+  const lastResultRef = useRef<any>(null);
 
   useEffect(() => {
     const checkWallet = async () => {
@@ -122,6 +127,24 @@ export default function RecommendationPage() {
     return Math.min(score, 99);
   };
 
+  const handleSaveRec = async () => {
+    const result = lastResultRef.current;
+    if (!result) return;
+    setSaving(true);
+    try {
+      const topScore = result.recommendations?.[0]?.match_score || 85;
+      await saveRecommendationToChain(
+        query,
+        result.preferences || {},
+        result.recommendations || [],
+        topScore,
+      );
+    } catch (e) {
+      console.error('Save failed:', e);
+    }
+    setSaving(false);
+  };
+
   const simulateAnalysis = async () => {
     if (!query.trim()) return;
 
@@ -133,6 +156,8 @@ export default function RecommendationPage() {
     const queryLower = query.toLowerCase();
     const preferences: string[] = [];
     let genLayerRecs: any[] | null = null;
+    let genLayerFailed = false;
+    let destsList: Destination[] = [];
 
     // ── Step 1: Submit to GenLayer + poll for consensus result ──
     if (useGenLayer) {
@@ -143,13 +168,19 @@ export default function RecommendationPage() {
       try {
         setConsensusPhase('validating');
         setAnalyzedPreferences(['Waiting for validator consensus...']);
+
+        // Fetch real destinations from Supabase for enrichment after GenLayer ranking
+        const { data: allDests } = await supabase.from('destinations').select('*');
+        destsList = allDests || [];
+
         const genResult = await getRecommendation(query);
+        lastResultRef.current = genResult;
         genLayerRecs = (genResult?.recommendations) || [];
-        const prefs = genResult?.preferences || {};
-        const prefEntries = Object.entries(prefs);
         setConsensusPhase('comparing');
 
         setAnalyzedPreferences([]);
+        const prefs = genResult?.preferences || {};
+        const prefEntries = Object.entries(prefs);
         for (const [k, v] of prefEntries) {
           await new Promise((r) => setTimeout(r, 100));
           setAnalyzedPreferences((prev) => [...prev, `${k}: ${v}`]);
@@ -163,8 +194,8 @@ export default function RecommendationPage() {
         await new Promise((r) => setTimeout(r, 400));
       } catch (e) {
         console.warn('GenLayer failed:', e);
-        setAnalyzedPreferences(['GenLayer tx failed — ' + (e instanceof Error ? e.message : String(e))]);
-        setConsensusPhase('idle');
+        setAnalyzedPreferences(['GenLayer transaction pending / timed out. Check explorer console for details.']);
+        setConsensusPhase('failed');
         setIsLoading(false);
         return;
       }
@@ -197,44 +228,65 @@ export default function RecommendationPage() {
     let finalResults: Destination[] = [];
 
     if (genLayerRecs && genLayerRecs.length > 0) {
-      // Enrich GenLayer results with images from Supabase
-      const { data: allDests } = await supabase.from('destinations').select('*');
-      const nameToDest = new Map((allDests || []).map((d: Destination) => [d.name.toLowerCase(), d]));
+      // Enrich GenLayer ranked names with full data + images from Supabase
+      const nameToDest = buildDestMap(destsList);
 
       for (const rec of genLayerRecs) {
         const dn = rec.name || '';
         const dbMatch = nameToDest.get(dn.toLowerCase());
-
-        const estCost = rec.estimated_cost || {};
-        const costMin = typeof estCost === 'object' ? (estCost.min || null) : null;
-        const costMax = typeof estCost === 'object' ? (estCost.max || null) : null;
-
-        const bestSeason = rec.best_season || '';
-        const seasonParts = bestSeason.includes(' - ') ? bestSeason.split(' - ') : [bestSeason, ''];
-
-        const enriched: any = {
-          id: dbMatch?.id || `gen_${dn}`,
-          name: dn,
-          location: rec.location || '',
-          description: rec.description || '',
-          image_url: dbMatch?.image_url || null,
-          tags: rec.tags || dbMatch?.tags || [],
-          average_cost_min: costMin || dbMatch?.average_cost_min || null,
-          average_cost_max: costMax || dbMatch?.average_cost_max || null,
-          best_time_start: seasonParts[0] || dbMatch?.best_time_start || null,
-          best_time_end: seasonParts[1] || dbMatch?.best_time_end || null,
-          vibe_type: rec.vibe_type || dbMatch?.vibe_type || null,
-          authenticity_score: dbMatch?.authenticity_score || 85,
-          popularity_score: dbMatch?.popularity_score || 50,
-          is_hidden_gem: dbMatch?.is_hidden_gem || false,
-          activities: dbMatch?.activities || [],
-          yearly_visitors_estimate: dbMatch?.yearly_visitors_estimate || null,
-          created_at: dbMatch?.created_at || '',
-          updated_at: dbMatch?.updated_at || '',
-          matchScore: rec.match_score || 85,
-        };
-        finalResults.push(enriched as Destination);
+        if (dbMatch) {
+          finalResults.push({
+            id: dbMatch.id,
+            name: dbMatch.name,
+            location: dbMatch.location,
+            description: dbMatch.description || '',
+            image_url: dbMatch.image_url || null,
+            tags: dbMatch.tags || [],
+            average_cost_min: dbMatch.average_cost_min ?? null,
+            average_cost_max: dbMatch.average_cost_max ?? null,
+            best_time_start: dbMatch.best_time_start || null,
+            best_time_end: dbMatch.best_time_end || null,
+            vibe_type: dbMatch.vibe_type || null,
+            authenticity_score: dbMatch.authenticity_score || 85,
+            popularity_score: dbMatch.popularity_score || 50,
+            is_hidden_gem: dbMatch.is_hidden_gem || false,
+            activities: dbMatch.activities || [],
+            yearly_visitors_estimate: dbMatch.yearly_visitors_estimate || null,
+            created_at: dbMatch.created_at || '',
+            updated_at: dbMatch.updated_at || '',
+            matchScore: rec.match_score || 85,
+          } as Destination);
+        } else {
+          // No Supabase match — use GenLayer data directly
+          finalResults.push({
+            id: `gen-${finalResults.length}`,
+            name: rec.name || 'Unknown',
+            location: rec.location || '',
+            description: rec.description || 'AI-recommended destination.',
+            image_url: null,
+            tags: [],
+            average_cost_min: rec.estimated_cost?.min ?? null,
+            average_cost_max: rec.estimated_cost?.max ?? null,
+            best_time_start: rec.best_season || null,
+            best_time_end: null,
+            vibe_type: null,
+            authenticity_score: 85,
+            popularity_score: 50,
+            is_hidden_gem: false,
+            activities: [],
+            yearly_visitors_estimate: null,
+            created_at: '',
+            updated_at: '',
+            matchScore: rec.match_score || 85,
+          } as Destination);
+        }
       }
+    } else if (useGenLayer && !genLayerFailed && (!genLayerRecs || genLayerRecs.length === 0)) {
+      // GenLayer was used but returned no recommendations yet — tx still pending
+      setAnalyzedPreferences(['GenLayer transaction pending on explorer, waiting for consensus...']);
+      setConsensusPhase('validating');
+      setIsLoading(false);
+      return;
     } else {
       // Fallback: use Supabase data
       const { data, error } = await supabase
@@ -271,15 +323,33 @@ export default function RecommendationPage() {
 
   const formatPrice = (min: number | null, max: number | null): string => {
     if (!min && !max) return 'Price varies';
-    if (!max) return `$${min?.toLocaleString()}+`;
-    return `$${min?.toLocaleString()} - $${max?.toLocaleString()}`;
+    if (!max) return `$${min?.toLocaleString()}+ per person`;
+    return `$${min?.toLocaleString()} - $${max?.toLocaleString()} per person`;
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-violet-50/30 to-background dark:via-violet-950/20">
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20 relative">
+      {/* Floating travel decorations */}
+      <div className="absolute top-20 left-[5%] text-teal-300/20 dark:text-teal-500/20 animate-float">
+        <Plane className="h-14 w-14" />
+      </div>
+      <div className="absolute top-32 right-[8%] text-emerald-300/20 dark:text-emerald-500/20 animate-float-delayed">
+        <Compass className="h-10 w-10" />
+      </div>
+      <div className="absolute bottom-48 left-[10%] text-teal-300/15 dark:text-teal-500/15 animate-float-slow">
+        <Navigation className="h-8 w-8" />
+      </div>
+
+      {/* Dotted route lines */}
+      <div className="absolute top-1/3 left-0 w-full h-px pointer-events-none">
+        <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+          <path d="M0 8 C200 0, 400 16, 600 8 C800 0, 1000 16, 1200 8" stroke="currentColor" className="text-teal-300/30 dark:text-teal-600/20" strokeWidth="2" strokeDasharray="4 4" />
+        </svg>
+      </div>
+
       <div className="container mx-auto px-4 py-12">
         <div className="text-center mb-12">
-          <Badge className="mb-4 bg-gradient-to-r from-violet-500/10 to-purple-500/10 text-violet-700 dark:text-violet-400">
+          <Badge className="mb-4 bg-gradient-to-r from-teal-500/10 to-emerald-500/10 text-teal-700 dark:text-teal-400">
             <Sparkles className="mr-2 h-3 w-3" />
             AI-Powered Recommendation
           </Badge>
@@ -360,10 +430,10 @@ export default function RecommendationPage() {
 
           <div className="lg:col-span-2 space-y-6">
             {step >= 1 && (
-              <Card className="border-violet-200 dark:border-violet-800">
+              <Card className="border-teal-200 dark:border-teal-800">
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white">
+                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white">
                       <Brain className="h-4 w-4" />
                     </div>
                     <div>
@@ -377,9 +447,9 @@ export default function RecommendationPage() {
                     {analyzedPreferences.map((pref, i) => (
                       <div
                         key={i}
-                        className="flex items-center gap-2 p-2 rounded-lg bg-violet-50 dark:bg-violet-950/30"
-                      >
-                        <CheckCircle2 className="h-4 w-4 text-violet-500" />
+                          className="flex items-center gap-2 p-2 rounded-lg bg-teal-50 dark:bg-teal-950/30"
+                        >
+                          <CheckCircle2 className="h-4 w-4 text-teal-500" />
                         <span className="text-sm">{pref}</span>
                       </div>
                     ))}
@@ -390,168 +460,41 @@ export default function RecommendationPage() {
 
             {step >= 2 && (
               <Card className={`overflow-hidden transition-all duration-500 border ${
-                consensusPhase === 'complete'
+                consensusPhase === 'complete' || consensusPhase === 'failed'
                   ? 'border-emerald-300 dark:border-emerald-700 shadow-lg shadow-emerald-500/10'
                   : 'border-amber-200 dark:border-amber-800'
               }`}>
-                <div className={`h-1 transition-all duration-1000 ${
-                  consensusPhase === 'submitting' ? 'w-1/4 bg-blue-500' :
-                  consensusPhase === 'validating' ? 'w-2/4 bg-amber-500' :
-                  consensusPhase === 'comparing' ? 'w-3/4 bg-violet-500' :
-                  'w-full bg-emerald-500'
-                }`} />
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center text-white transition-all duration-700 ${
-                      consensusPhase === 'complete'
-                        ? 'bg-gradient-to-br from-emerald-500 to-teal-600 scale-110'
-                        : consensusPhase === 'comparing'
-                        ? 'bg-gradient-to-br from-violet-500 to-purple-600 animate-pulse'
-                        : 'bg-gradient-to-br from-amber-500 to-orange-600 animate-pulse'
-                    }`}>
-                      {consensusPhase === 'complete' ? (
+                <CardContent className="py-6">
+                  {consensusPhase !== 'complete' && consensusPhase !== 'failed' ? (
+                    <PlaneLoader
+                      label={
+                        consensusPhase === 'submitting' ? 'Submitting to GenLayer Bradbury...' :
+                        consensusPhase === 'validating' ? 'AI validators analyzing your preferences...' :
+                        consensusPhase === 'comparing' ? 'Validating via EqNonComparative...' :
+                        'Processing...'
+                      }
+                    />
+                  ) : consensusPhase === 'complete' ? (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shrink-0">
                         <CheckCircle2 className="h-5 w-5" />
-                      ) : (
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                      )}
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">
-                        {consensusPhase === 'complete' ? 'Consensus Reached' : 'Multi-Validator Consensus'}
-                      </CardTitle>
-                      <CardDescription>
-                        {consensusPhase === 'submitting' && 'Submitting to GenLayer Bradbury...'}
-                        {consensusPhase === 'validating' && 'AI validators analyzing your query independently...'}
-                        {consensusPhase === 'comparing' && 'Comparing validator outputs via run_nondet_unsafe...'}
-                        {consensusPhase === 'complete' && 'All validators agreed on-chain — result verified'}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="relative">
-                    {/* Validator Nodes Network Visualization */}
-                    <div className="grid grid-cols-3 gap-4 mb-4">
-                      {[
-                        { name: 'GPT-4', label: 'Alpha', color: 'from-blue-500 to-blue-600', delay: '0ms' },
-                        { name: 'Claude 3', label: 'Beta', color: 'from-amber-500 to-orange-600', delay: '200ms' },
-                        { name: 'Gemini Pro', label: 'Gamma', color: 'from-emerald-500 to-teal-600', delay: '400ms' },
-                      ].map((v, i) => (
-                        <div key={i} className="relative flex flex-col items-center">
-                          <div className={`relative transition-all duration-700`}
-                               style={{ animationDelay: v.delay }}>
-                            <div className={`h-16 w-16 rounded-full flex items-center justify-center text-white text-lg font-bold bg-gradient-to-br ${v.color} ${
-                              consensusPhase === 'complete'
-                                ? 'shadow-lg shadow-emerald-500/20'
-                                : consensusPhase === 'validating' || (consensusPhase === 'comparing')
-                                ? 'animate-pulse shadow-lg'
-                                : ''
-                            }`}>
-                              <Brain className="h-6 w-6" />
-                            </div>
-                            {consensusPhase === 'validating' && (
-                              <div className="absolute -top-1 -right-1">
-                                <span className="flex h-4 w-4">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500" />
-                                </span>
-                              </div>
-                            )}
-                            {consensusPhase === 'complete' && (
-                              <div className="absolute -top-1 -right-1">
-                                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-xs font-medium mt-2">{v.name}</span>
-                          <span className="text-[10px] text-muted-foreground">Validator {v.label}</span>
-                          {consensusPhase === 'complete' && (
-                            <div className="flex items-center gap-1 mt-1">
-                              <Shield className="h-3 w-3 text-emerald-500" />
-                              <span className="text-[10px] text-emerald-600 font-medium">Verified</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Network Connection Lines (CSS) */}
-                    <div className="hidden md:block absolute top-8 left-[16.67%] right-[16.67%] h-0.5">
-                      <div className={`h-full transition-all duration-1000 ${
-                        consensusPhase === 'complete' ? 'bg-emerald-300' : 'bg-muted-foreground/20'
-                      }`} />
-                    </div>
-
-                    {/* Consensus Details Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                      {[
-                        { icon: Network, label: 'Network', value: 'Bradbury' },
-                        { icon: Shield, label: 'Mechanism', value: 'run_nondet_unsafe' },
-                        { icon: Zap, label: 'Threshold', value: '≥ 67%' },
-                        { icon: Globe, label: 'Chain ID', value: '4221' },
-                      ].map((item, i) => (
-                        <div key={i} className={`p-2 rounded-lg text-center transition-all duration-500 ${
-                          consensusPhase === 'complete'
-                            ? 'bg-emerald-50 dark:bg-emerald-950/30'
-                            : 'bg-muted/30'
-                        }`}>
-                          <item.icon className={`h-4 w-4 mx-auto mb-1 ${
-                            consensusPhase === 'complete' ? 'text-emerald-600' : 'text-muted-foreground'
-                          }`} />
-                          <div className="text-[10px] text-muted-foreground">{item.label}</div>
-                          <div className="text-xs font-medium">{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Completion Banner */}
-                    {consensusPhase === 'complete' && (
-                      <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 text-white text-center animate-in slide-in-from-bottom-2 duration-500">
-                        <div className="flex items-center justify-center gap-2 mb-1">
-                          <Award className="h-5 w-5" />
-                          <span className="font-semibold">On-Chain Consensus Verified</span>
-                          <Award className="h-5 w-5" />
-                        </div>
-                        <p className="text-xs text-emerald-100">
-                          Contract: {process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS?.slice(0, 10)}...
-                        </p>
                       </div>
-                    )}
-
-                    {/* Phase Timeline */}
-                    <div className="flex items-center justify-between mt-4 px-2">
-                      {[
-                        { phase: 'submitting', label: 'Submit' },
-                        { phase: 'validating', label: 'Validate' },
-                        { phase: 'comparing', label: 'Compare' },
-                        { phase: 'complete', label: 'Consensus' },
-                      ].map((s, i) => {
-                        const isActive = ['submitting', 'validating', 'comparing', 'complete'].indexOf(consensusPhase) >= i;
-                        const isCurrent = consensusPhase === s.phase;
-                        return (
-                          <div key={i} className="flex flex-col items-center gap-1">
-                            <div className={`h-6 w-6 rounded-full flex items-center justify-center transition-all duration-500 ${
-                              isCurrent
-                                ? 'bg-amber-500 scale-125 shadow-lg shadow-amber-500/30'
-                                : isActive
-                                ? 'bg-emerald-500'
-                                : 'bg-muted-foreground/20'
-                            }`}>
-                              {isActive ? (
-                                <CheckCircle2 className="h-3 w-3 text-white" />
-                              ) : (
-                                <div className="h-2 w-2 rounded-full bg-muted-foreground/40" />
-                              )}
-                            </div>
-                            <span className={`text-[10px] ${
-                              isCurrent ? 'text-amber-600 font-medium' :
-                              isActive ? 'text-emerald-600' : 'text-muted-foreground'
-                            }`}>{s.label}</span>
-                          </div>
-                        );
-                      })}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Consensus Reached</p>
+                        <p className="text-sm text-muted-foreground">Validators agreed on-chain — result verified</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shrink-0">
+                        <Network className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Transaction Pending</p>
+                        <p className="text-sm text-muted-foreground">Check explorer for finalization</p>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -639,12 +582,14 @@ export default function RecommendationPage() {
 
                           <div className="flex gap-2">
                             <Button
-                              className="flex-1 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
+                    className="flex-1 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
                               onClick={() => router.push(`/itinerary?destination=${encodeURIComponent(dest.name)}`)}>
                               Generate Itinerary
                               <ArrowRight className="ml-2 h-4 w-4" />
                             </Button>
-                            <Button variant="outline">Save Trip</Button>
+                            <Button variant="outline" onClick={handleSaveRec} disabled={saving}>
+                              {saving ? 'Saving...' : 'Save Trip'}
+                            </Button>
                           </div>
                         </div>
                       </div>

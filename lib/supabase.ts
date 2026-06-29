@@ -152,3 +152,14 @@ export async function getTopDestinations(limit: number = 6): Promise<Destination
 
   return data || [];
 }
+
+/** Compact destinations to minimal JSON for contract analysis (sends only names to keep payload small) */
+export function compactDestinations(dests: Destination[]): string {
+  // Only send names — LLM ranks them, frontend enriches with full data from Supabase
+  return JSON.stringify(dests.map(d => d.name));
+}
+
+/** Full destination lookup map keyed by lowercased name */
+export function buildDestMap(dests: Destination[]): Map<string, Destination> {
+  return new Map(dests.map(d => [d.name.toLowerCase(), d]));
+}

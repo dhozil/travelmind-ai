@@ -8,7 +8,7 @@
       "file": "contracts/TravelMindAI.py",
       "name": "TravelMind AI",
       "description": "Unified contract: AI recommendations, itineraries, travel match, hidden gems, on-chain storage",
-      "address": "0x6858C53D519CBE7C5f1149B262Ea7B30E618273f",
+      "address": "0xE517EA4C50949562307f8c8FF5862DdCdF494c93",
       "validators": [
         { "id": "alpha", "model": "gpt-4", "weight": 1 },
         { "id": "beta", "model": "claude-3", "weight": 1 },

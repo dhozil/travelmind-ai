@@ -9,6 +9,9 @@ import {
   CheckCircle2,
   Wallet,
   Target,
+  Plane,
+  Compass,
+  MapPin,
 } from 'lucide-react';
 
 
@@ -36,19 +39,27 @@ const values = [
   },
 ];
 
-const timeline = [
-  { year: '2023', event: 'Idea conceived during a trip exploring hidden gems' },
-  { year: '2024 Q1', event: 'First prototype with basic AI recommendation' },
-  { year: '2024 Q2', event: 'GenLayer integration for validator consensus' },
-  { year: '2024 Q3', event: 'Launched AI Itinerary Generator' },
-  { year: '2024 Q4', event: 'Added Travel Match and Hidden Gems features' },
-  { year: '2025', event: 'Expanded to global destinations worldwide' },
-  { year: '2026', event: 'Integrated with GenLayer Bradbury Testnet' },
-];
-
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-teal-50/30 to-background dark:via-teal-950/20">
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20 relative">
+      {/* Floating travel decorations */}
+      <div className="absolute top-20 left-[10%] text-teal-300/20 dark:text-teal-500/20 animate-float">
+        <Plane className="h-14 w-14" />
+      </div>
+      <div className="absolute top-32 right-[10%] text-emerald-300/20 dark:text-emerald-500/20 animate-float-delayed">
+        <Compass className="h-12 w-12" />
+      </div>
+      <div className="absolute bottom-64 left-[12%] text-teal-300/15 dark:text-teal-500/15 animate-float-slow">
+        <MapPin className="h-10 w-10" />
+      </div>
+
+      {/* Dotted route lines */}
+      <div className="absolute top-1/3 left-0 w-full h-px pointer-events-none">
+        <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+          <path d="M0 8 C200 0, 500 16, 800 8 C1000 0, 1100 16, 1200 8" stroke="currentColor" className="text-teal-300/30 dark:text-teal-600/20" strokeWidth="2" strokeDasharray="4 5" />
+        </svg>
+      </div>
+
       <div className="container mx-auto px-4 py-12">
         {/* Hero */}
         <section className="text-center mb-20">
@@ -146,24 +157,6 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* Timeline */}
-        <section className="mb-20">
-          <div className="text-center mb-12">
-            <h2 className="text-2xl font-bold mb-4">Our Journey</h2>
-          </div>
-          <div className="max-w-2xl mx-auto">
-            <div className="relative border-l-2 border-teal-200 dark:border-teal-800 pl-6 space-y-8">
-              {timeline.map((item, i) => (
-                <div key={i} className="relative">
-                  <div className="absolute -left-8 top-0 h-4 w-4 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600" />
-                  <div className="text-sm font-bold text-teal-600">{item.year}</div>
-                  <div className="text-muted-foreground">{item.event}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* Stats */}
         <section className="bg-gradient-to-r from-teal-600 to-emerald-700 rounded-2xl p-8 text-white text-center">
           <h2 className="text-2xl font-bold mb-8">TravelMind AI by the Numbers</h2>
@@ -171,7 +164,7 @@ export default function AboutPage() {
             {[
               { value: '51', label: 'Destinations' },
               { value: '49', label: 'Vibe Types' },
-              { value: '3', label: 'AI Validators' },
+              { value: '5', label: 'AI Validators' },
               { value: '24/7', label: 'AI Support' },
             ].map((stat) => (
               <div key={stat.label}>

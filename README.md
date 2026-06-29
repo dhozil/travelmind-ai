@@ -7,10 +7,10 @@ AI-powered travel recommendation platform built on **GenLayer** Intelligent Cont
 ## How it works
 
 ```
-User prompt → GenLayer contract → AI leader/validators (run_nondet_unsafe) → consensus → result
+User prompt → GenLayer contract → AI leader generates recommendations → Validators evaluate via EqNonComparative → consensus → result
 ```
 
-Every recommendation, itinerary, travel match, and hidden gem finding runs through a `run_nondet_unsafe` leader/validator pattern — a single `gl.nondet.exec_prompt` call inside an AI leader function, validated by a structural validator (`isinstance(leader, gl.vm.Return)`). The transaction is signed via MetaMask (GenLayer Snap) and settled on Bradbury testnet.
+Every recommendation, itinerary, travel match, and hidden gem finding runs through `prompt_non_comparative` — a GenLayer equivalence principle where the leader generates output via LLM, and validators independently **evaluate** the output against objective criteria (rather than re-generating their own competing output). The transaction is signed via MetaMask (GenLayer Snap) and settled on Bradbury testnet.
 
 ### Features
 
@@ -43,14 +43,16 @@ Every recommendation, itinerary, travel match, and hidden gem finding runs throu
 
 A single `gl.Contract` with the following methods:
 
-- `@gl.public.write` — AI methods: `recommend`, `generate_itinerary`, `match_by_image`, `find_hidden_gems` (all use `run_nondet_unsafe` with `exec_prompt`)
+- `@gl.public.write` — AI methods: `recommend`, `generate_itinerary`, `match_by_image`, `find_hidden_gems` (all use `gl.eq_principle.prompt_non_comparative`)
 - `@gl.public.write` — Storage methods: `save_trip`, `save_recommendation`
 - `@gl.public.view` — Read methods: `get_last_recommendation`, `get_last_itinerary`, `get_last_match`, `get_last_gems`, `get_trip`, `get_recommendation`, `get_user_trips`, `get_user_recommendations`, `get_stats`
 
 All AI methods follow this pattern:
-1. `leader_fn` calls `gl.nondet.exec_prompt` once; `validator_fn` checks the result is a `gl.vm.Return`
-2. Results stored in a `TreeMap[str, str]` keyed by sender address (EIP-55 checksummed)
-3. Frontend submits via `writeContract`, waits for receipt (`waitForTransactionReceipt` with `ACCEPTED` status), then reads data via `callView`
+1. `user_input()` returns the raw user parameters as JSON (no LLM call)
+2. `EqNonComparativeLeader` template takes `task` + `input` + `criteria` → generates output via LLM
+3. `EqNonComparativeValidator` template checks leader's output satisfies `criteria` given the `input`
+4. Results stored in a `TreeMap[str, str]` keyed by sender address (EIP-55 checksummed)
+5. Storage writes use fire-and-forget (no consensus wait); AI writes poll until ACCEPTED
 
 ### Frontend (`lib/genlayer.ts`)
 
@@ -82,7 +84,7 @@ npm install
 NEXT_PUBLIC_SUPABASE_URL=https://txabofbwpyojtusvcbrp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://rpc-bradbury.genlayer.com
-NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0x6858C53D519CBE7C5f1149B262Ea7B30E618273f
+NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS=0xdA9e0b6686D887Dce47676610D9B63F16Bd49099
 ```
 
 ### Dev
@@ -126,6 +128,7 @@ travelmind-ai/
 │   ├── itinerary/               # Itinerary generator
 │   ├── travel-match/            # Travel vibe matcher
 │   ├── hidden-gems/             # Hidden gem finder
+│   ├── dashboard/               # Saved trips & recommendations view
 │   └── about/                   # About page
 ├── genlayer.json                # GenLayer deployment config
 └── .env                         # Environment variables
@@ -135,9 +138,23 @@ travelmind-ai/
 
 ## Design Decisions
 
+### Why `prompt_non_comparative` instead of `run_nondet_unsafe` or `prompt_comparative`?
+
+GenLayer offers several equivalence principles for LLM-based consensus. We chose `prompt_non_comparative` based on the nature of our task:
+
+| Principle | Mechanism | Problem for TravelMind |
+|-----------|-----------|----------------------|
+| `strict_eq` | Exact byte-for-byte match | Impossible — different AI models never produce identical output |
+| `prompt_comparative` | Both leader and validator generate independent output, then an LLM compares them | Heterogeneous validator LLMs recommend **different destinations** with **different scores**. Comparing "Bali" vs "Phuket" or `85` vs `72` via LLM always results in validators disagreeing → `UNDETERMINED` |
+| `run_nondet_unsafe` with custom validator | Programmatic field-by-field comparison of leader vs validator output | Same fundamental problem: comparing destination names (`"Bali" != "Phuket"`) or scores (`|85-72| > 10%`) causes validators to reject. A structural-only check (ignoring content) defeats consensus purpose |
+| **`prompt_non_comparative`** ✅ | Leader generates output via LLM; validators **evaluate** the output against criteria without generating their own | Validators don't need to agree on specific destinations — they verify the output is valid JSON, scores are in range 0-100, costs are reasonable, etc. This achieves **near 100% consensus** even across different AI models |
+
+**Key insight**: Travel recommendations are inherently **subjective and creative** — different travel experts (or AI models) will naturally recommend different places. Forcing them to agree on the same destinations is counterproductive. Instead, validators check **quality and validity** of the leader's output against the user's query.
+
+### Other decisions
+
 - **No fake data** — All stats, testimonials, and team content are real (from Supabase or the contract). No hallucinations.
 - **Simplified prompts** — Concise prompts reduce LLM response time and malformed JSON from validators.
-- **`_extract_json` / `_parse_recommendations`** — Handles malformed JSON and pipe-delimited output from validators using regex fallback and line-by-line parsing.
-- **Store-then-read pattern** — AI methods store their result in a TreeMap before returning. The frontend `waitForTransactionReceipt(ACCEPTED)` then reads via `callView`.
-- **`run_nondet_unsafe` with structural validator** — Leader runs `exec_prompt`; validator only checks the result type. This avoids consensus failures from minor formatting differences.
+- **Store-then-read pattern** — AI methods store their result in a TreeMap before returning. The frontend reads via `callView`.
+- **Fire-and-forget storage writes** — `save_trip` and `save_recommendation` are pure storage writes with no AI calls, so the frontend submits them without waiting for consensus finalization.
 - **No `simulateWriteContract`** — All writes go through real `writeContract` with MetaMask signing.

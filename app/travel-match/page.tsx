@@ -22,16 +22,18 @@ import {
   CheckCircle,
   DollarSign,
   Eye,
+  Compass,
+  Plane,
 } from 'lucide-react';
 import { matchByTravelVibe } from '@/lib/genlayer';
-import { supabase } from '@/lib/supabase';
+import { supabase, buildDestMap } from '@/lib/supabase';
 
 const fallbackImages = [
   'https://images.pexels.com/photos/2161467/pexels-photo-2161467.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1287460/pexels-photo-1287460.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3408744/pexels-photo-3408744.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/2387871/pexels-photo-2387871.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/1732289/pexels-photo-1732289.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/2090645/pexels-photo-2090645.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1005417/pexels-photo-1005417.jpeg?auto=compress&cs=tinysrgb&w=800',
 ];
 
@@ -124,6 +126,9 @@ export default function TravelMatchPage() {
     try {
       const imageHash = simpleHash(uploadedImage);
 
+      // Fetch real destinations from Supabase for enrichment after GenLayer matching
+      const { data: allDests } = await supabase.from('destinations').select('*');
+
       const result = await matchByTravelVibe(
         imageHash,
         caption || 'travel photo',
@@ -132,6 +137,12 @@ export default function TravelMatchPage() {
 
       const analysis: ImageAnalysis = result?.image_analysis || {};
       const matchList: MatchResult[] = result?.matches || [];
+
+      if (matchList.length === 0 && process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS) {
+        // GenLayer tx still pending — wait, don't silently show empty
+        setIsLoading(false);
+        return;
+      }
 
       setImageAnalysis(analysis);
 
@@ -150,18 +161,24 @@ export default function TravelMatchPage() {
         setAnalysisFeatures((prev) => [...prev, f]);
       }
 
-      // Enrich matches with images from Supabase
-      const { data: allDests } = await supabase.from('destinations').select('*');
-      const nameToDest = new Map((allDests || []).map((d) => [d.name.toLowerCase(), d]));
+      // Enrich matches with full data + images from Supabase
+      const nameToDest = buildDestMap(allDests || []);
 
       const enrichedMatches = matchList.map((m, i) => {
-        const dbMatch = nameToDest.get(m.name.toLowerCase());
+        const dbMatch = nameToDest.get((m.name || '').toLowerCase());
+        if (!dbMatch) return null;
         return {
-          ...m,
-          _imageUrl: dbMatch?.image_url || null,
+          name: dbMatch.name,
+          location: dbMatch.location,
+          description: dbMatch.description || '',
+          match_score: m.match_score || 85,
+          why_match: m.why_match || '',
+          image_vibe_match: m.image_vibe_match || m.match_score || 85,
+          estimated_cost: { min: dbMatch.average_cost_min || 0, max: dbMatch.average_cost_max || 0 },
+          _imageUrl: dbMatch.image_url || null,
           _index: i,
         };
-      });
+      }).filter((x): x is NonNullable<typeof x> => x != null);
 
       setMatches(enrichedMatches);
     } catch (e) {
@@ -181,12 +198,30 @@ export default function TravelMatchPage() {
 
   const formatPrice = (min: number | null | undefined, max: number | null | undefined): string => {
     if (!min && !max) return 'Price varies';
-    if (!max) return `$${min?.toLocaleString()}+`;
-    return `$${min?.toLocaleString()} - $${max?.toLocaleString()}`;
+    if (!max) return `$${min?.toLocaleString()}+ per person`;
+    return `$${min?.toLocaleString()} - $${max?.toLocaleString()} per person`;
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-emerald-50/30 to-background dark:via-emerald-950/20">
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20 relative">
+      {/* Floating travel decorations */}
+      <div className="absolute top-24 left-[8%] text-emerald-300/20 dark:text-emerald-500/20 animate-float">
+        <Compass className="h-14 w-14" />
+      </div>
+      <div className="absolute top-32 right-[10%] text-teal-300/20 dark:text-teal-500/20 animate-float-delayed">
+        <MapPin className="h-12 w-12" />
+      </div>
+      <div className="absolute bottom-40 left-[12%] text-emerald-300/15 dark:text-emerald-500/15 animate-float-slow">
+        <Plane className="h-10 w-10" />
+      </div>
+
+      {/* Dotted route lines */}
+      <div className="absolute top-1/3 left-0 w-full h-px pointer-events-none">
+        <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+          <path d="M0 8 C200 0, 450 16, 700 8 C950 0, 1100 16, 1200 8" stroke="currentColor" className="text-emerald-300/30 dark:text-emerald-600/20" strokeWidth="2" strokeDasharray="5 5" />
+        </svg>
+      </div>
+
       <div className="container mx-auto px-4 py-12">
         <div className="text-center mb-12">
           <Badge className="mb-4 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 text-emerald-700 dark:text-emerald-400">

@@ -2,182 +2,47 @@
 
 from genlayer import *
 import json
-import re as regex_mod
 
 
-def _clean_json(text: str) -> str:
-    """Remove markdown code fences from LLM output."""
-    backticks = "``" + "`"
-    text = text.replace(backticks + "json", "").replace(backticks, "")
-    return text.strip()
+def _fix_json(s):
+    """Fix malformed JSON from AI validators: missing commas, trailing commas."""
+    import re
+    # Add missing commas between key-value pairs: "val""key" -> "val","key"
+    s = re.sub(r'"([^"]*)"(\s*)"', r'"\1", "\2"', s, flags=re.DOTALL)
+    # Add missing comma after value before next key: "val"  "key" -> "val", "key"
+    s = re.sub(r'("[^"]*")(\s+)(?=")', r'\1,\2', s)
+    # Remove trailing commas before } or ]
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+    return s
 
 
-def _extract_json(text: str) -> dict:
-    """Best-effort JSON extraction from LLM output."""
-    text = _clean_json(text)
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        pass
-    match = regex_mod.search(r"\{[\s\S]*\}", text)
-    if match:
+def _to_dict(raw):
+    """Convert prompt_comparative result to dict.
+    Handles: dict (pass-through), str (strip code fences + parse JSON).
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            first_nl = cleaned.find("\n")
+            if first_nl != -1:
+                cleaned = cleaned[first_nl + 1:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
         try:
-            return json.loads(match.group(0))
-        except (json.JSONDecodeError, ValueError):
+            return json.loads(cleaned)
+        except Exception:
             pass
-    return {}
-
-
-def _parse_recommendations(text: str) -> list:
-    """Parse pipe-delimited recommendation text into list of dicts."""
-    recs = []
-
-    sections = text.split("6")
-
-    for section in sections:
-        section = section.strip()
-        if not section or len(section) < 20:
-            continue
-
-        if section.startswith("recommendations"):
-            section = section.replace("recommendations", "", 1).strip(" -|")
-            if not section:
-                continue
-
-        rec = {"name": "", "location": "", "description": "", "best_season": "", "match_score": 75, "estimated_cost": {"min": 500, "max": 2000}}
-
-        parts = [p.strip() for p in section.split("|") if p.strip()]
-
-        i = 0
-        while i < len(parts):
-            p = parts[i]
-            pl = p.lower()
-
-            # Combined key-value: location<, locationD, locationl, location, name<, named, namel, name,, nameT
-            # Also: best_seasont, descriptiont
-            combined = False
-            for prefix, key in [("location<", "location"), ("locationd", "location"),
-                               ("locationl", "location"), ("location,", "location"),
-                               ("name<", "name"), ("named", "name"),
-                               ("namel", "name"), ("name,", "name"),
-                               ("namet", "name"), ("name\\", "name"),
-                               ("best_seasont", "best_season"),
-                               ("descriptiont", "description")]:
-                if pl.startswith(prefix):
-                    val = p[len(prefix):].strip()
-                    if val:
-                        rec[key] = val
-                    combined = True
-                    break
-            if combined:
-                i += 1
-                continue
-
-            # Standalone keys
-            if pl == "best_season" and i + 1 < len(parts):
-                rec["best_season"] = parts[i + 1].strip()
-                i += 2
-            elif pl == "description" and i + 1 < len(parts):
-                rec["description"] = parts[i + 1].strip()[:300]
-                i += 2
-            elif pl == "estimated_cost":
-                # Next part might be location value or empty
-                if i + 1 < len(parts):
-                    nxt = parts[i + 1].strip()
-                    nxtl = nxt.lower()
-                    # If next part is NOT a known key, treat as location value
-                    if nxtl not in ("best_season", "description", "estimated_cost", "match_score") and not any(nxtl.startswith(p) for p in ["location", "name"]):
-                        if not rec["location"]:
-                            rec["location"] = nxt
-                        i += 2
-                    else:
-                        i += 1
-                else:
-                    i += 1
-            elif pl == "match_score":
-                # Next part might be name value (not a number)
-                if i + 1 < len(parts):
-                    nxt = parts[i + 1].strip()
-                    nxtl = nxt.lower()
-                    try:
-                        rec["match_score"] = int(nxt)
-                        i += 2
-                    except:
-                        # Check combined key-value: nameXvalue
-                        nm = False
-                        for prefix, key in [("name<", "name"), ("named", "name"),
-                                           ("namel", "name"), ("name,", "name"),
-                                           ("namet", "name"), ("name\\", "name")]:
-                            if nxtl.startswith(prefix):
-                                val = nxt[len(prefix):].strip()
-                                if val:
-                                    rec[key] = val
-                                nm = True
-                                break
-                        if not nm:
-                            # Plain text after match_score = name
-                            if not any(nxtl.startswith(p) for p in ["location"]):
-                                if not rec["name"]:
-                                    rec["name"] = nxt
-                        i += 2
-                else:
-                    i += 1
-            else:
-                i += 1
-
-        if rec["description"] or rec["location"] or rec["name"]:
-            recs.append(rec)
-
-    return recs
-
-
-def _calc_match_score(query: str, name: str, location: str, description: str) -> int:
-    """Calculate match score based on keyword overlap between query and destination."""
-    score = 60
-    ql = query.lower()
-    dl = f"{name} {location} {description}".lower()
-
-    # Keyword matches
-    keywords = {
-        "family": ["family", "kids", "children"],
-        "cool": ["cool", "mountain", "alpine", "lake", "snow", "cold"],
-        "beach": ["beach", "coastal", "ocean", "sea", "island", "tropical"],
-        "photo": ["photo", "scenic", "views", "picturesque", "photography"],
-        "hiking": ["hike", "hiking", "trail", "trek", "walk"],
-        "history": ["historic", "ancient", "temple", "heritage", "ruins", "museum"],
-        "city": ["city", "urban", "downtown", "nightlife"],
-        "nature": ["nature", "park", "forest", "wildlife", "garden"],
-        "budget": ["budget", "cheap", "affordable"],
-        "romantic": ["romantic", "couples", "honeymoon"],
-    }
-
-    for category, words in keywords.items():
-        if any(w in ql for w in words):
-            if any(w in dl for w in words):
-                score += 8
-
-    return min(score, 95)
-
-
-def _estimate_cost(location: str) -> dict:
-    """Estimate cost based on location."""
-    loc = location.lower()
-
-    if any(x in loc for x in ["thailand", "vietnam", "cambodia", "laos", "myanmar", "india", "nepal", "indonesia"]):
-        return {"min": 300, "max": 800}
-    if any(x in loc for x in ["japan", "south korea", "taiwan", "malaysia", "philippines"]):
-        return {"min": 600, "max": 1500}
-    if any(x in loc for x in ["france", "italy", "spain", "germany", "uk", "england", "portugal", "greece", "europe"]):
-        return {"min": 800, "max": 2500}
-    if any(x in loc for x in ["usa", "united states", "canada", "new york", "california", "florida", "texas"]):
-        return {"min": 800, "max": 2500}
-    if any(x in loc for x in ["australia", "new zealand"]):
-        return {"min": 1000, "max": 3000}
-    if any(x in loc for x in ["africa", "kenya", "tanzania", "south africa", "morocco"]):
-        return {"min": 600, "max": 1800}
-    if any(x in loc for x in ["brazil", "argentina", "mexico", "peru", "colombia"]):
-        return {"min": 500, "max": 1500}
-    return {"min": 500, "max": 2000}
+        cleaned = _fix_json(cleaned)
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+        cleaned = cleaned.replace(",}", "}").replace(",]", "]")
+        return json.loads(cleaned)
+    raise gl.vm.UserError("LLM did not return dict or string")
 
 
 class TravelMindAI(gl.Contract):
@@ -203,91 +68,42 @@ class TravelMindAI(gl.Contract):
     def recommend(self, query: str, max_results: bigint = 5) -> str:
         limit = int(max_results) if max_results > 0 else 5
 
-        def leader_fn() -> dict:
-            prompt = (
-                f"Recommend {limit} travel destinations for: {query}\n"
-                "Each must have: name, location, description (1-2 sentences), "
-                "match_score (60-95, how well it matches the query), "
-                "best_season (e.g. November to February), "
-                "estimated_cost with min and max in USD (e.g. 500 and 2000).\n"
-                "Return valid JSON array."
-            )
-            res = gl.nondet.exec_prompt(prompt, response_format="json")
-            if isinstance(res, dict):
-                return res
-            if isinstance(res, list):
-                return {"recommendations": res}
-            return {"recommendations": []}
+        def user_input() -> str:
+            return json.dumps({"query": query, "max_results": limit})
 
-        def validator_fn(leader: gl.vm.Result) -> bool:
-            # Accept leader result directly - no second LLM call
-            return isinstance(leader, gl.vm.Return)
-
-        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        
-        # Try JSON first, then pipe format
-        if isinstance(raw, dict):
-            result = raw
-        elif isinstance(raw, str):
-            result = _extract_json(raw)
-            if not result or not result.get("recommendations"):
-                # Try pipe format parsing
-                recs = _parse_recommendations(raw)
-                if recs:
-                    result = {"recommendations": recs}
-                else:
-                    result = {"recommendations": []}
-        else:
-            result = {"recommendations": []}
-
-        recs = result.get("recommendations", [])
+        raw = gl.eq_principle.prompt_non_comparative(
+            user_input,
+            task="You are a travel expert. Based on the user input, generate exactly "
+                 f"{limit} destination recommendations.\n"
+                 "Return ONLY valid JSON with exactly 2 keys:\n"
+                 "1. \"preferences\": object with destination_type, budget_min, budget_max (per person USD), "
+                 "duration_days, group_type, activities (array of 3-5 strings)\n"
+                 f"2. \"recommendations\": array of exactly {limit} objects, each with: "
+                 "name, location, description (1-2 sentences), match_score (int 0-100), "
+                 "best_season, estimated_cost per person {{min, max}} in USD\n"
+                 "Sort recommendations by match_score descending.",
+            criteria="""
+                Output must be valid JSON with exactly 2 keys: 'preferences' (object) and 'recommendations' (array).
+                'preferences' must be an object with appropriate keys.
+                'recommendations' must be an array of objects.
+                Each recommendation must have: name (string), location (string), description (string), 
+                match_score (integer 0-100), best_season (string), estimated_cost (object with integer min/max in USD).
+                Recommendations must be sorted by match_score descending.
+""",
+        )
+        data = _to_dict(raw)
+        prefs = data.get("preferences", {}) if isinstance(data, dict) else {}
+        recs = data.get("recommendations", []) if isinstance(data, dict) else []
         if not isinstance(recs, list):
             recs = []
-
-        # Clean each recommendation
-        clean_recs = []
-        for r in recs[:limit]:
-            if not isinstance(r, dict):
-                continue
-            name = str(r.get("name", "Unknown"))
-            location = str(r.get("location", "Unknown"))
-            description = str(r.get("description", ""))
-
-            # Calculate match_score if default (75) or missing
-            ms = int(r.get("match_score", 75))
-            if ms == 75:
-                ms = _calc_match_score(query, name, location, description)
-
-            # Estimate cost if default (500-2000) or missing
-            est = r.get("estimated_cost", {})
-            if isinstance(est, dict):
-                cost_min = int(est.get("min", 0))
-                cost_max = int(est.get("max", 0))
-            else:
-                cost_min = 0
-                cost_max = 0
-            if cost_min == 500 and cost_max == 2000:
-                est = _estimate_cost(location)
-                cost_min = est["min"]
-                cost_max = est["max"]
-
-            clean_recs.append({
-                "name": name,
-                "location": location,
-                "description": description,
-                "match_score": ms,
-                "best_season": str(r.get("best_season", "Year-round")),
-                "estimated_cost": {"min": cost_min, "max": cost_max},
-            })
-
-        out = json.dumps({
+        result = json.dumps({
             "query": query,
-            "preferences": result.get("preferences", {}),
-            "recommendations": clean_recs,
+            "preferences": prefs,
+            "recommendations": recs[:limit],
             "validator_id": str(gl.message.sender_address),
         })
-        self.last_recommendation[str(gl.message.sender_address)] = out
-        return out
+        self.last_recommendation[str(gl.message.sender_address)] = result
+        return result
 
     # ═══════════════════════════════════════════════════════════════════
     # 2. ITINERARY GENERATOR
@@ -298,60 +114,64 @@ class TravelMindAI(gl.Contract):
         self, destination: str, days: bigint,
         budget: bigint, travelers: bigint, preferences: str,
     ) -> str:
-        def leader_fn() -> dict:
-            prompt = (
-                f"Plan {int(days)} days in {destination}, budget ${int(budget)}, {preferences}\n"
-                "Return JSON: {\"daily_plans\":[{\"day\":1,\"title\":\"...\","
-                "\"highlights\":[\"...\"],\"cost\":100}]}"
-            )
-            res = gl.nondet.exec_prompt(prompt, response_format="json")
-            if isinstance(res, dict):
-                return res
-            if isinstance(res, list):
-                return {"daily_plans": res}
-            return {"daily_plans": []}
+        total_days = int(days)
 
-        def validator_fn(leader: gl.vm.Result) -> bool:
-            return isinstance(leader, gl.vm.Return)
+        def user_input() -> str:
+            return json.dumps({
+                "destination": destination,
+                "days": total_days,
+                "budget_per_person": int(budget),
+                "travelers": int(travelers),
+                "preferences": preferences,
+            })
 
-        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
-        if not result:
-            result = {"daily_plans": []}
+        def _normalize_plans(val):
+            """Parse and normalize itinerary to a flat list of day dicts."""
+            parsed = _to_dict(val)
+            if isinstance(parsed, dict):
+                if "itinerary" in parsed and isinstance(parsed["itinerary"], list):
+                    return parsed["itinerary"]
+                return [parsed]
+            if isinstance(parsed, list) and parsed:
+                first = parsed[0]
+                if isinstance(first, dict) and "itinerary" in first:
+                    flat = []
+                    for item in parsed:
+                        if isinstance(item, dict) and "itinerary" in item:
+                            flat.extend(item["itinerary"])
+                        else:
+                            flat.append(item)
+                    return flat
+            return parsed if isinstance(parsed, list) else []
 
-        plans = result.get("daily_plans", [])
-        if not isinstance(plans, list):
-            plans = []
+        crit = (f"Output must be a valid JSON array of {total_days} day objects. "
+                "Each object must have: day (integer), title (string), highlights (array of strings), "
+                "cost (integer per person USD). All costs must be positive integers within the budget.")
 
-        # Normalize nested structures
-        flat = []
-        for item in plans:
-            if isinstance(item, dict):
-                found = False
-                for key in ["plan", "itinerary", "days", "items"]:
-                    if key in item and isinstance(item[key], list):
-                        flat.extend(item[key])
-                        found = True
-                        break
-                if not found:
-                    flat.append(item)
-            elif isinstance(item, list):
-                flat.extend(item)
-
-        total_cost = sum(
-            p.get("total_cost", p.get("cost", 0))
-            for p in flat
-            if isinstance(p, dict)
+        raw = gl.eq_principle.prompt_non_comparative(
+            user_input,
+            task=f"Plan {total_days} days in the destination based on the user input. "
+                 f"Generate exactly {total_days} days.\n"
+                 "Return ONLY a JSON array of day objects, each with:\n"
+                 "  day (int), title (string), highlights (array of strings), "
+                 "cost per person (int, in USD)\n"
+                 "Example: [{{\"day\":1, \"title\":\"Arrival & City Tour\", "
+                 "\"highlights\":[\"Visit old town\",\"Try local food\"], \"cost\":50}}]\n"
+                 "All costs are per person in USD. Total must stay within budget.",
+            criteria=crit,
         )
+        daily_plans = _normalize_plans(raw)
 
-        out = json.dumps({
+        total_cost = sum(p.get("cost", 0) for p in daily_plans if isinstance(p, dict))
+
+        result = json.dumps({
             "destination": destination,
-            "total_days": int(days),
-            "daily_plans": flat[:int(days)],
+            "total_days": total_days,
+            "daily_plans": daily_plans[:total_days],
             "total_cost": total_cost,
         })
-        self.last_itinerary[str(gl.message.sender_address)] = out
-        return out
+        self.last_itinerary[str(gl.message.sender_address)] = result
+        return result
 
     # ═══════════════════════════════════════════════════════════════════
     # 3. TRAVEL MATCH
@@ -359,35 +179,36 @@ class TravelMindAI(gl.Contract):
 
     @gl.public.write
     def match_by_image(self, image_hash: str, caption: str, max_results: bigint = 5) -> str:
-        def leader_fn() -> dict:
-            prompt = (
-                f"Find {int(max_results)} destinations matching this vibe: {caption}\n"
-                "Return JSON: {\"matches\":[{\"name\":\"...\",\"location\":\"...\","
-                "\"match_score\":85,\"description\":\"...\"}]}"
-            )
-            res = gl.nondet.exec_prompt(prompt, response_format="json")
-            if isinstance(res, dict):
-                return res
-            return {"matches": []}
+        limit = int(max_results)
 
-        def validator_fn(leader: gl.vm.Result) -> bool:
-            return isinstance(leader, gl.vm.Return)
+        def user_input() -> str:
+            return json.dumps({"image_hash": image_hash, "caption": caption, "max_results": limit})
 
-        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
-        if not result:
-            result = {"matches": []}
-
-        matches = result.get("matches", [])
-        if not isinstance(matches, list):
-            matches = []
-
-        out = json.dumps({
-            "image_analysis": result.get("image_analysis", {}),
-            "matches": matches[:int(max_results)],
+        raw = gl.eq_principle.prompt_non_comparative(
+            user_input,
+            task="Analyze the travel vibe from the user input and find matching destinations.\n"
+                 "Return ONLY valid JSON with exactly 2 keys:\n"
+                 "1. \"image_analysis\": object with landscape_type, atmosphere, dominant_colors (array), "
+                 "natural_elements (array), human_activity_level (0-100), vibe_summary (string)\n"
+                 f"2. \"matches\": array of exactly {limit} destinations, "
+                 "each with: name, location, why_match, match_score (0-100), "
+                 "estimated_cost per person {{min, max}} in USD, image_vibe_match (0-100), description.\n"
+                 "Sorted by match_score descending.",
+            criteria="""
+                Output must be valid JSON with exactly 2 keys: 'image_analysis' (object) and 'matches' (array).
+                Each match must have: name (string), location (string), why_match (string), 
+                match_score (integer 0-100), estimated_cost (object with integer min/max), 
+                image_vibe_match (integer 0-100), description (string).
+                Matches sorted by match_score descending.
+""",
+        )
+        data = _to_dict(raw)
+        result = json.dumps({
+            "image_analysis": data.get("image_analysis", {}),
+            "matches": data.get("matches", [])[:limit],
         })
-        self.last_match[str(gl.message.sender_address)] = out
-        return out
+        self.last_match[str(gl.message.sender_address)] = result
+        return result
 
     # ═══════════════════════════════════════════════════════════════════
     # 4. HIDDEN GEM FINDER
@@ -398,35 +219,48 @@ class TravelMindAI(gl.Contract):
         self, preferences: str,
         budget_max: bigint = 0, category: str = "any", max_results: bigint = 10,
     ) -> str:
-        def leader_fn() -> dict:
-            prompt = (
-                f"Find {int(max_results)} hidden gem destinations for: {preferences}\n"
-                f"Budget: ${int(budget_max)}, Category: {category}\n"
-                "Return JSON: {\"hidden_gems\":[{\"name\":\"...\",\"location\":\"...\","
-                "\"description\":\"...\",\"hidden_score\":85,\"best_season\":\"...\"}]}"
-            )
-            res = gl.nondet.exec_prompt(prompt, response_format="json")
-            if isinstance(res, list):
-                return {"hidden_gems": res}
-            if isinstance(res, dict):
-                return res
-            return {"hidden_gems": []}
+        limit = int(max_results)
 
-        def validator_fn(leader: gl.vm.Result) -> bool:
-            return isinstance(leader, gl.vm.Return)
+        def user_input() -> str:
+            return json.dumps({
+                "preferences": preferences,
+                "budget_max": int(budget_max),
+                "category": category,
+                "max_results": limit,
+            })
 
-        raw = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
-        result = _extract_json(json.dumps(raw) if isinstance(raw, dict) else str(raw))
-        if not result:
-            result = {"hidden_gems": []}
+        def _normalize_gems(val):
+            parsed = _to_dict(val)
+            if isinstance(parsed, dict):
+                return [parsed]
+            return parsed if isinstance(parsed, list) else []
 
-        gems = result.get("hidden_gems", [])
-        if not isinstance(gems, list):
-            gems = []
-
-        out = json.dumps({"hidden_gems": gems[:int(max_results)]})
-        self.last_gems[str(gl.message.sender_address)] = out
-        return out
+        raw = gl.eq_principle.prompt_non_comparative(
+            user_input,
+            task=f"Find {limit} hidden gem destinations based on the user input.\n"
+                 "Hidden = not widely known, authentic, minimal commercial tourism.\n"
+                 "For each gem, self-verify: assess popularity, tourist traffic, authenticity, "
+                 "social media presence, infrastructure.\n"
+                 "Return ONLY a JSON array. Each element:\n"
+                 "  name, location, description, hidden_score 0-100, "
+                 "estimated_cost per person {{min, max}} USD, why_hidden, best_season, tags[], "
+                 "authenticity_rating 0-100, comparable_popular_spot, "
+                 "verification: object with is_hidden (bool), confidence 0-100, reasons[], why_authentic.\n"
+                 "Sorted by hidden_score descending.",
+            criteria="""
+                Output must be a valid JSON array of gem objects.
+                Each gem must have: name (string), location (string), description (string), 
+                hidden_score (integer 0-100), estimated_cost (object with integer min/max), 
+                why_hidden (string), best_season (string), tags (array of strings), 
+                authenticity_rating (integer 0-100), comparable_popular_spot (string),
+                verification (object with is_hidden bool, confidence 0-100, reasons array, why_authentic string).
+                Gems sorted by hidden_score descending.
+""",
+        )
+        gems = _normalize_gems(raw)
+        result = json.dumps({"hidden_gems": gems[:limit]})
+        self.last_gems[str(gl.message.sender_address)] = result
+        return result
 
     # ═══════════════════════════════════════════════════════════════════
     # 5. ON-CHAIN STORAGE

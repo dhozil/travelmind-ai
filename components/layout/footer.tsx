@@ -16,6 +16,7 @@ const footerLinks = {
     { name: 'Itinerary Generator', href: '/itinerary' },
     { name: 'Travel Match', href: '/travel-match' },
     { name: 'Hidden Gems', href: '/hidden-gems' },
+    { name: 'Dashboard', href: '/dashboard' },
   ],
   company: [
     { name: 'About Us', href: '/about' },
@@ -38,8 +39,8 @@ export function Footer() {
       <div className="container mx-auto px-4 py-12 lg:py-16">
         <div className="grid grid-cols-2 gap-8 lg:grid-cols-6">
           <div className="col-span-2">
-            <Link href="/" className="flex items-center space-x-2">
-              <div className="rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600 p-2">
+            <Link href="/" className="flex items-center space-x-2 group">
+              <div className="rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600 p-2 transition-transform duration-300 group-hover:rotate-[-12deg] group-hover:scale-110">
                 <Plane className="h-5 w-5 text-white" />
               </div>
               <span className="text-xl font-bold bg-gradient-to-r from-teal-600 to-emerald-600 bg-clip-text text-transparent">
@@ -118,7 +119,7 @@ export function Footer() {
         <div className="mt-12 pt-8 border-t">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-muted-foreground">
-              2024 TravelMind AI. All rights reserved. Powered by GenLayer.
+              2026 TravelMind AI. All rights reserved. Powered by GenLayer.
             </p>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">

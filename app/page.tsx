@@ -15,18 +15,23 @@ import {
   Wallet,
   Brain,
   Target,
+  Plane,
+  Compass,
+  Navigation,
+  Database,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { getChainStats } from '@/lib/genlayer';
 
 const fallbackImages = [
   'https://images.pexels.com/photos/2161467/pexels-photo-2161467.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1287460/pexels-photo-1287460.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3408744/pexels-photo-3408744.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/2387871/pexels-photo-2387871.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/1732289/pexels-photo-1732289.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/2090645/pexels-photo-2090645.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1005417/pexels-photo-1005417.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1898155/pexels-photo-1898155.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/3225516/pexels-photo-3225516.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/1486970/pexels-photo-1486970.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3614418/pexels-photo-3614418.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1167025/pexels-photo-1167025.jpeg?auto=compress&cs=tinysrgb&w=800',
 ];
@@ -103,11 +108,23 @@ async function getStats() {
     .from('destinations')
     .select('vibe_type');
   const uniqueVibes = new Set(vibes?.map(v => v.vibe_type).filter(Boolean)).size;
+
+  let chainRecs = '–', chainUsers = '–';
+  try {
+    const stats = await getChainStats() as any;
+    if (stats) {
+      chainRecs = String(stats.total_recommendations ?? '–');
+      chainUsers = String(stats.total_users ?? '–');
+    }
+  } catch {
+    // GenLayer not configured / unavailable
+  }
+
   return [
     { value: String(destCount ?? 0), label: 'Destinations' },
-    { value: String(uniqueVibes), label: 'Vibe Types' },
-    { value: '3', label: 'AI Validators' },
-    { value: '24/7', label: 'AI Support' },
+    { value: chainRecs, label: 'On-Chain Recommendations' },
+    { value: chainUsers, label: 'Users' },
+    { value: '5', label: 'AI Validators' },
   ];
 }
 
@@ -127,7 +144,74 @@ export default async function Home() {
     <div className="flex flex-col">
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20">
+        {/* Animated gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-teal-400/5 via-emerald-300/5 to-teal-400/5 animate-shimmer pointer-events-none" />
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgwLDAsMCwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-40 pointer-events-none" />
+
+        {/* Flying planes across the screen */}
+        <div className="absolute top-1/4 left-0 pointer-events-none z-20">
+          <Plane className="h-6 w-6 text-teal-500/30 dark:text-teal-400/30 animate-fly-across" />
+        </div>
+        <div className="absolute top-3/4 left-0 pointer-events-none z-20">
+          <Plane className="h-4 w-4 text-emerald-500/25 dark:text-emerald-400/25 animate-fly-across-2" />
+        </div>
+
+        {/* Floating glowing particles */}
+        <div className="absolute top-[30%] left-[20%] pointer-events-none">
+          <div className="h-2 w-2 rounded-full bg-teal-400/40 animate-travel-particle" />
+        </div>
+        <div className="absolute top-[40%] left-[70%] pointer-events-none">
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/30 animate-travel-particle-2" style={{ animationDelay: '1s' }} />
+        </div>
+        <div className="absolute top-[50%] left-[40%] pointer-events-none">
+          <div className="h-2 w-2 rounded-full bg-teal-400/35 animate-travel-particle" style={{ animationDelay: '2s' }} />
+        </div>
+        <div className="absolute top-[35%] left-[55%] pointer-events-none">
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/30 animate-travel-particle-2" style={{ animationDelay: '3s' }} />
+        </div>
+        <div className="absolute top-[55%] left-[30%] pointer-events-none">
+          <div className="h-2 w-2 rounded-full bg-teal-400/25 animate-travel-particle" style={{ animationDelay: '0.5s' }} />
+        </div>
+
+        {/* Pulsing location markers */}
+        <div className="absolute top-[28%] left-[25%] pointer-events-none">
+          <div className="h-3 w-3 rounded-full bg-teal-500/30 animate-ring-pulse" />
+        </div>
+        <div className="absolute top-[45%] left-[65%] pointer-events-none">
+          <div className="h-2.5 w-2.5 rounded-full bg-emerald-500/30 animate-ring-pulse" style={{ animationDelay: '1s' }} />
+        </div>
+        <div className="absolute top-[55%] left-[45%] pointer-events-none">
+          <div className="h-2 w-2 rounded-full bg-teal-500/25 animate-ring-pulse" style={{ animationDelay: '0.5s' }} />
+        </div>
+
+        {/* Floating travel decorations */}
+        <div className="absolute top-20 left-[10%] text-teal-400/20 dark:text-teal-600/20 animate-float">
+          <Plane className="h-16 w-16" />
+        </div>
+        <div className="absolute top-40 right-[12%] text-emerald-400/20 dark:text-emerald-600/20 animate-float-delayed">
+          <Compass className="h-12 w-12" />
+        </div>
+        <div className="absolute bottom-32 left-[8%] text-teal-400/15 dark:text-teal-600/15 animate-float-slow">
+          <MapPin className="h-10 w-10" />
+        </div>
+        <div className="absolute bottom-40 right-[10%] text-emerald-400/15 dark:text-emerald-600/15 animate-float-delayed">
+          <Navigation className="h-8 w-8" />
+        </div>
+
+        {/* Dotted travel route lines with animated dashes */}
+        <div className="absolute top-1/4 left-0 w-full h-px pointer-events-none">
+          <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+            <path d="M0 8 C200 0, 400 16, 600 8 C800 0, 1000 16, 1200 8" stroke="currentColor" className="text-teal-300/40 dark:text-teal-600/30" strokeWidth="2" strokeDasharray="4 6" />
+            <path d="M0 8 C200 0, 400 16, 600 8 C800 0, 1000 16, 1200 8" stroke="currentColor" className="text-teal-400/60 dark:text-teal-500/40 animate-move-dash" strokeWidth="2" strokeDasharray="4 6" strokeDashoffset="0" />
+          </svg>
+        </div>
+        <div className="absolute bottom-1/3 left-0 w-full h-px pointer-events-none">
+          <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+            <path d="M0 8 C300 16, 500 0, 700 8 C900 16, 1100 0, 1200 8" stroke="currentColor" className="text-emerald-300/40 dark:text-emerald-600/30" strokeWidth="2" strokeDasharray="6 8" />
+            <path d="M0 8 C300 16, 500 0, 700 8 C900 16, 1100 0, 1200 8" stroke="currentColor" className="text-emerald-400/60 dark:text-emerald-500/40 animate-move-dash" strokeWidth="2" strokeDasharray="6 8" strokeDashoffset="0" />
+          </svg>
+        </div>
+
         <div className="container mx-auto px-4 py-20 lg:py-32">
           <div className="flex flex-col items-center text-center">
             <Badge className="mb-6 bg-gradient-to-r from-teal-500/10 to-emerald-500/10 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800">
@@ -145,7 +229,7 @@ export default async function Home() {
               AI-powered recommendations that understand your preferences. Verified by multiple AI validators on blockchain for unbiased, trustworthy results.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row gap-4">
-              <Button size="lg" className="bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white shadow-lg" asChild>
+              <Button size="lg" className="bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white shadow-lg hover:shadow-teal-500/25 transition-shadow duration-300" asChild>
                 <a href="#features">
                   <Sparkles className="mr-2 h-5 w-5" />
                   Get AI Recommendation
@@ -178,7 +262,8 @@ export default async function Home() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-20 lg:py-28 scroll-mt-20">
+      <section id="features" className="py-20 lg:py-28 scroll-mt-20 relative bg-gradient-to-b from-emerald-50/50 via-white to-teal-50/50 dark:from-emerald-950/10 dark:via-background dark:to-teal-950/10">
+        <div className="absolute inset-0 bg-dot-travel opacity-50 pointer-events-none" />
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <Badge variant="outline" className="mb-4">AI Features</Badge>
@@ -221,7 +306,7 @@ export default async function Home() {
       </section>
 
       {/* How It Works */}
-      <section className="py-20 lg:py-28 bg-gradient-to-b from-muted/50 to-background">
+      <section className="py-20 lg:py-28 bg-gradient-to-b from-teal-50/50 via-white to-emerald-50/50 dark:from-teal-950/10 dark:via-background dark:to-emerald-950/10">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <Badge variant="outline" className="mb-4">Process</Badge>
@@ -257,7 +342,7 @@ export default async function Home() {
       </section>
 
       {/* GenLayer Section */}
-      <section className="py-20 lg:py-28">
+      <section className="py-20 lg:py-28 bg-gradient-to-b from-emerald-50/30 via-white to-teal-50/30 dark:from-emerald-950/5 dark:via-background dark:to-teal-950/5">
         <div className="container mx-auto px-4">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
@@ -337,7 +422,7 @@ export default async function Home() {
       </section>
 
       {/* Popular Destinations */}
-      <section className="py-20 lg:py-28 bg-gradient-to-b from-muted/50 to-background">
+      <section className="py-20 lg:py-28 bg-gradient-to-b from-teal-50/50 via-white to-emerald-50/50 dark:from-teal-950/10 dark:via-background dark:to-emerald-950/10">
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <Badge variant="outline" className="mb-4">Discover</Badge>

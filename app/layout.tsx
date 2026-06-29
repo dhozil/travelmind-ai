@@ -39,9 +39,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.className} min-h-screen bg-background`}>
-        <Header />
-        <main>{children}</main>
-        <Footer />
+        <div className="fixed inset-0 bg-world-map pointer-events-none z-0" />
+        <div className="fixed inset-0 bg-dot-travel pointer-events-none z-0" />
+        <div className="relative z-10">
+          <Header />
+          <main>{children}</main>
+          <Footer />
+        </div>
       </body>
     </html>
   );

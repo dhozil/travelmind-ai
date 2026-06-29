@@ -80,3 +80,150 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  .animate-float-delayed {
+    animation: float 6s ease-in-out 2s infinite;
+  }
+  .animate-float-slow {
+    animation: float 8s ease-in-out 1s infinite;
+  }
+  .animate-fly {
+    animation: fly 20s linear infinite;
+  }
+  .animate-spin-slow {
+    animation: spin 20s linear infinite;
+  }
+  .animate-pulse-soft {
+    animation: pulse-soft 3s ease-in-out infinite;
+  }
+  .animate-shimmer {
+    background-size: 200% 200%;
+    animation: shimmer 6s ease-in-out infinite;
+  }
+  .animate-move-dash {
+    animation: move-dash 1s linear infinite;
+  }
+  .animate-travel-particle {
+    animation: travel-particle 4s ease-out infinite;
+  }
+  .animate-travel-particle-2 {
+    animation: travel-particle-2 5s ease-out infinite;
+  }
+  .animate-ring-pulse {
+    animation: ring-pulse 2s ease-out infinite;
+  }
+  .animate-fly-across {
+    animation: fly-across 18s linear infinite;
+  }
+  .animate-fly-across-2 {
+    animation: fly-across-2 22s linear infinite;
+  }
+
+  .bg-world-map {
+    background-image: url("data:image/svg+xml,%3Csvg width='400' height='300' viewBox='0 0 400 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M50 150 Q100 100 150 120 Q180 80 220 100 Q250 70 300 90 Q340 110 350 150' fill='none' stroke='%2326a69a' stroke-width='0.5' opacity='0.15'/%3E%3Cpath d='M30 180 Q80 160 120 170 Q160 150 200 180 Q240 160 280 175 Q320 165 370 180' fill='none' stroke='%2326a69a' stroke-width='0.5' opacity='0.12'/%3E%3Cpath d='M60 210 Q100 195 140 210 Q180 195 220 215 Q260 200 320 210' fill='none' stroke='%2326a69a' stroke-width='0.5' opacity='0.10'/%3E%3Ccircle cx='120' cy='140' r='2' fill='%2326a69a' opacity='0.2'/%3E%3Ccircle cx='250' cy='110' r='2.5' fill='%2326a69a' opacity='0.2'/%3E%3Ccircle cx='320' cy='160' r='1.5' fill='%2326a69a' opacity='0.2'/%3E%3Ccircle cx='180' cy='190' r='2' fill='%2326a69a' opacity='0.15'/%3E%3Ccircle cx='80' cy='200' r='1.5' fill='%2326a69a' opacity='0.15'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 400px 300px;
+  }
+
+  .bg-dot-travel {
+    background-image: radial-gradient(circle, rgba(38, 166, 154, 0.12) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-15px); }
+}
+
+@keyframes fly {
+  0% { transform: translateX(-10%) translateY(0); }
+  50% { transform: translateX(50%) translateY(-20px); }
+  100% { transform: translateX(110%) translateY(0); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes move-dash {
+  to { stroke-dashoffset: -40; }
+}
+
+@keyframes travel-particle {
+  0% { transform: translateY(0) translateX(0) scale(0); opacity: 0; }
+  10% { opacity: 1; scale: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-120px) translateX(30px) scale(0); opacity: 0; }
+}
+
+@keyframes travel-particle-2 {
+  0% { transform: translateY(0) translateX(0) scale(0); opacity: 0; }
+  10% { opacity: 0.8; scale: 1; }
+  90% { opacity: 0.8; }
+  100% { transform: translateY(-100px) translateX(-20px) scale(0); opacity: 0; }
+}
+
+@keyframes ring-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.4); }
+  70% { box-shadow: 0 0 0 20px rgba(38, 166, 154, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(38, 166, 154, 0); }
+}
+
+@keyframes fly-across {
+  0% { transform: translateX(-120px) translateY(0) rotate(-5deg); }
+  25% { transform: translateX(25vw) translateY(-30px) rotate(3deg); }
+  50% { transform: translateX(50vw) translateY(0) rotate(-2deg); }
+  75% { transform: translateX(75vw) translateY(-20px) rotate(4deg); }
+  100% { transform: translateX(calc(100vw + 120px)) translateY(0) rotate(-5deg); }
+}
+
+@keyframes fly-across-2 {
+  0% { transform: translateX(calc(100vw + 100px)) translateY(0) rotate(5deg); }
+  25% { transform: translateX(75vw) translateY(-20px) rotate(-3deg); }
+  50% { transform: translateX(50vw) translateY(0) rotate(2deg); }
+  75% { transform: translateX(25vw) translateY(-15px) rotate(-4deg); }
+  100% { transform: translateX(-120px) translateY(0) rotate(5deg); }
+}
+
+/* ── Airplane route loading animation ──────────────────────────── */
+@keyframes plane-orbit {
+  0%   { transform: rotate(0deg)   translateX(60px) rotate(0deg);   }
+  25%  { transform: rotate(90deg)  translateX(60px) rotate(-90deg); }
+  50%  { transform: rotate(180deg) translateX(60px) rotate(-180deg);}
+  75%  { transform: rotate(270deg) translateX(60px) rotate(-270deg);}
+  100% { transform: rotate(360deg) translateX(60px) rotate(-360deg);}
+}
+.animate-plane-orbit {
+  animation: plane-orbit 10s linear infinite;
+}
+
+@keyframes trail-dash {
+  to { stroke-dashoffset: -40; }
+}
+.animate-trail-dash {
+  animation: trail-dash 0.8s linear infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 0.5; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 4s ease-in-out infinite;
+}
+.animate-pulse-dot:nth-child(2) { animation-delay: 0.8s; }
+.animate-pulse-dot:nth-child(3) { animation-delay: 1.6s; }
+.animate-pulse-dot:nth-child(4) { animation-delay: 2.4s; }
+.animate-pulse-dot:nth-child(5) { animation-delay: 3.2s; }

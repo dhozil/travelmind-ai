@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
   DollarSign,
   Loader2,
   Sparkles,
+  CheckCircle2,
   Eye,
   Clock,
   Shield,
@@ -22,19 +23,22 @@ import {
   Filter,
   Search,
   Shuffle,
+  Compass,
+  Navigation,
 } from 'lucide-react';
-import { supabase, type Destination } from '@/lib/supabase';
+import { supabase, type Destination, buildDestMap } from '@/lib/supabase';
 import { findHiddenGems } from '@/lib/genlayer';
+import PlaneLoader from '@/components/ui/plane-loader';
 
 const fallbackImages = [
   'https://images.pexels.com/photos/2161467/pexels-photo-2161467.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1287460/pexels-photo-1287460.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3408744/pexels-photo-3408744.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/2387871/pexels-photo-2387871.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/1732289/pexels-photo-1732289.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/2090645/pexels-photo-2090645.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1005417/pexels-photo-1005417.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1898155/pexels-photo-1898155.jpeg?auto=compress&cs=tinysrgb&w=800',
-  'https://images.pexels.com/photos/3225516/pexels-photo-3225516.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/1486970/pexels-photo-1486970.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/3614418/pexels-photo-3614418.jpeg?auto=compress&cs=tinysrgb&w=800',
   'https://images.pexels.com/photos/1167025/pexels-photo-1167025.jpeg?auto=compress&cs=tinysrgb&w=800',
 ];
@@ -55,12 +59,24 @@ export default function HiddenGemsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [gems, setGems] = useState<Destination[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [consensusPhase, setConsensusPhase] = useState<'idle' | 'submitting' | 'validating' | 'comparing' | 'complete' | 'failed'>('idle');
+  const lastGemsRef = useRef<any>(null);
 
   const searchGems = async () => {
     setIsLoading(true);
     setHasSearched(true);
+    setConsensusPhase('submitting');
 
     try {
+      // Fetch real hidden gems from Supabase for enrichment after GenLayer ranking
+      const { data: gems } = await supabase
+        .from('destinations')
+        .select('*')
+        .eq('is_hidden_gem', true)
+        .order('popularity_score', { ascending: true })
+        .limit(20);
+
+      setConsensusPhase('validating');
       const result = await findHiddenGems(
         filter || 'hidden authentic destinations',
         budgetMax !== 'any' ? parseInt(budgetMax) : 0,
@@ -69,28 +85,44 @@ export default function HiddenGemsPage() {
       );
 
       const gemsList = result?.hidden_gems || [];
-      setGems(gemsList.map((g: any, i: number) => ({
-        id: `gem_${i}`,
-        name: g.name || '',
-        location: g.location || '',
-        description: g.description || '',
-        image_url: null,
-        tags: g.tags || [],
-        average_cost_min: g.estimated_cost?.min || null,
-        average_cost_max: g.estimated_cost?.max || null,
-        best_time_start: g.best_season?.split(' - ')[0] || null,
-        best_time_end: g.best_season?.split(' - ')[1] || null,
-        vibe_type: null,
-        authenticity_score: g.authenticity_rating || g.hidden_score || 85,
-        popularity_score: g.hidden_score || 50,
-        is_hidden_gem: true,
-        activities: g.tags || [],
-        yearly_visitors_estimate: null,
-        created_at: '',
-        updated_at: '',
-      })));
+
+      if (gemsList.length === 0 && process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS) {
+        setConsensusPhase('failed');
+        setIsLoading(false);
+        return;
+      }
+
+      lastGemsRef.current = result;
+      setConsensusPhase('complete');
+
+      const nameToGem = buildDestMap(gems || []);
+      setGems(gemsList.map((g: any, i: number) => {
+        const full = nameToGem.get((g.name || '').toLowerCase());
+        if (!full) return null;
+        return {
+          id: full.id,
+          name: full.name,
+          location: full.location,
+          description: full.description || '',
+          image_url: full.image_url || null,
+          tags: full.tags || [],
+          average_cost_min: full.average_cost_min ?? null,
+          average_cost_max: full.average_cost_max ?? null,
+          best_time_start: full.best_time_start || null,
+          best_time_end: full.best_time_end || null,
+          vibe_type: full.vibe_type || null,
+          authenticity_score: full.authenticity_score || g.hidden_score || 85,
+          popularity_score: full.popularity_score || 50,
+          is_hidden_gem: true,
+          activities: full.activities || [],
+          yearly_visitors_estimate: full.yearly_visitors_estimate || null,
+          created_at: full.created_at || '',
+          updated_at: full.updated_at || '',
+        };
+      }).filter((x: any): x is Destination => x != null));
     } catch (e) {
       console.error('Failed to find hidden gems:', e);
+      setConsensusPhase('failed');
       setGems([]);
     }
 
@@ -121,6 +153,55 @@ export default function HiddenGemsPage() {
   const loadInitialGems = async () => {
     setIsLoading(true);
     setHasSearched(true);
+    setConsensusPhase('submitting');
+
+    const useGenLayer = !!process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS;
+
+    if (useGenLayer) {
+      try {
+        setConsensusPhase('validating');
+        const result = await findHiddenGems('authentic hidden destinations', 0, 'any', 6);
+        const gemsList = result?.hidden_gems || [];
+
+        if (gemsList.length > 0) {
+          const { data: gems } = await supabase
+            .from('destinations')
+            .select('*')
+            .eq('is_hidden_gem', true)
+            .order('popularity_score', { ascending: true })
+            .limit(20);
+
+          lastGemsRef.current = result;
+          setConsensusPhase('complete');
+
+          const nameToGem = buildDestMap(gems || []);
+          setGems(gemsList.map((g: any) => {
+            const full = nameToGem.get((g.name || '').toLowerCase());
+            if (!full) return null;
+            return {
+              id: full.id, name: full.name, location: full.location,
+              description: full.description || '', image_url: full.image_url || null,
+              tags: full.tags || [], average_cost_min: full.average_cost_min ?? null,
+              average_cost_max: full.average_cost_max ?? null,
+              best_time_start: full.best_time_start || null,
+              best_time_end: full.best_time_end || null,
+              vibe_type: full.vibe_type || null,
+              authenticity_score: full.authenticity_score || g.hidden_score || 85,
+              popularity_score: full.popularity_score || 50,
+              is_hidden_gem: true, activities: full.activities || [],
+              yearly_visitors_estimate: full.yearly_visitors_estimate || null,
+              created_at: full.created_at || '', updated_at: full.updated_at || '',
+            } as Destination;
+          }).filter((x: any): x is Destination => x != null));
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        // fall through to Supabase fallback
+      }
+    }
+
+    // Fallback: load from Supabase
     const { data } = await supabase
       .from('destinations')
       .select('*')
@@ -128,19 +209,38 @@ export default function HiddenGemsPage() {
       .order('popularity_score', { ascending: true })
       .limit(6);
     if (data) setGems(data);
+    setConsensusPhase('idle');
     setIsLoading(false);
   };
 
   const formatPrice = (min: number | null, max: number | null): string => {
     if (!min && !max) return 'Price varies';
-    if (!max) return `$${min?.toLocaleString()}+`;
-    return `$${min?.toLocaleString()} - $${max?.toLocaleString()}`;
+    if (!max) return `$${min?.toLocaleString()}+ per person`;
+    return `$${min?.toLocaleString()} - $${max?.toLocaleString()} per person`;
   };
 
   const displayGems = gems.sort((a, b) => a.popularity_score - b.popularity_score);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-amber-50/30 to-background dark:via-amber-950/20">
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20 relative">
+      {/* Floating travel decorations */}
+      <div className="absolute top-20 right-[12%] text-teal-300/20 dark:text-teal-500/20 animate-float">
+        <Compass className="h-14 w-14" />
+      </div>
+      <div className="absolute top-36 left-[8%] text-emerald-300/20 dark:text-emerald-500/20 animate-float-delayed">
+        <MapPin className="h-12 w-12" />
+      </div>
+      <div className="absolute bottom-44 right-[8%] text-teal-300/15 dark:text-teal-500/15 animate-float-slow">
+        <Navigation className="h-8 w-8" />
+      </div>
+
+      {/* Dotted route lines */}
+      <div className="absolute top-1/4 left-0 w-full h-px pointer-events-none">
+        <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+          <path d="M0 8 C250 16, 500 0, 750 8 C1000 16, 1100 0, 1200 8" stroke="currentColor" className="text-teal-300/30 dark:text-teal-600/20" strokeWidth="2" strokeDasharray="3 6" />
+        </svg>
+      </div>
+
       <div className="container mx-auto px-4 py-12">
         <div className="text-center mb-12">
           <Badge className="mb-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-amber-700 dark:text-amber-400">
@@ -247,12 +347,37 @@ export default function HiddenGemsPage() {
           <div className="lg:col-span-3 space-y-6">
             {isLoading && (
               <Card className="border-amber-200 dark:border-amber-800">
-                <CardContent className="py-12 text-center">
-                  <Loader2 className="mx-auto h-12 w-12 animate-spin text-amber-500 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">Discovering Hidden Gems</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Searching for unique destinations...
-                  </p>
+                <CardContent className="py-6">
+                  {consensusPhase !== 'complete' && consensusPhase !== 'failed' ? (
+                    <PlaneLoader
+                      label={
+                        consensusPhase === 'submitting' ? 'Submitting to GenLayer Bradbury...' :
+                        consensusPhase === 'validating' ? 'AI validators searching for hidden gems...' :
+                        consensusPhase === 'comparing' ? 'Validating via EqNonComparative...' :
+                        'Processing...'
+                      }
+                    />
+                  ) : consensusPhase === 'complete' ? (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shrink-0">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Consensus Reached</p>
+                        <p className="text-sm text-muted-foreground">Validators agreed on-chain — result verified</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shrink-0">
+                        <Gem className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Transaction Pending</p>
+                        <p className="text-sm text-muted-foreground">Check explorer for finalization</p>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,9 +18,13 @@ import {
   Sparkles,
   Shuffle,
   CheckCircle2,
+  Plane,
+  Navigation,
+  Globe,
 } from 'lucide-react';
+import PlaneLoader from '@/components/ui/plane-loader';
 import { supabase, type Destination } from '@/lib/supabase';
-import { generateItinerary } from '@/lib/genlayer';
+import { generateItinerary, saveTripToChain } from '@/lib/genlayer';
 
 interface DayPlan {
   day: number;
@@ -41,6 +45,9 @@ export default function ItineraryPage() {
   const [isLoadingDestinations, setIsLoadingDestinations] = useState(true);
   const [dailyPlans, setDailyPlans] = useState<DayPlan[]>([]);
   const [totalCost, setTotalCost] = useState(0);
+  const [consensusPhase, setConsensusPhase] = useState<'idle' | 'submitting' | 'validating' | 'comparing' | 'complete' | 'failed'>('idle');
+  const [saving, setSaving] = useState(false);
+  const lastPlanRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDestinations();
@@ -80,7 +87,9 @@ export default function ItineraryPage() {
     if (!selectedDestination) return;
 
     setIsLoading(true);
+    setConsensusPhase('submitting');
     try {
+      setConsensusPhase('validating');
       const result = await generateItinerary(
         selectedDestination.name,
         parseInt(duration),
@@ -96,19 +105,66 @@ export default function ItineraryPage() {
         cost: p.cost || 0,
       }));
 
+      if (plans.length === 0 && process.env.NEXT_PUBLIC_GENLAYER_CONTRACT_ADDRESS) {
+        setConsensusPhase('failed');
+        setIsLoading(false);
+        return;
+      }
+
+      lastPlanRef.current = result;
+      setConsensusPhase('complete');
       setDailyPlans(plans);
       setTotalCost(plans.reduce((sum, p) => sum + p.cost, 0));
     } catch (e) {
       console.error('Failed to generate itinerary:', e);
+      setConsensusPhase('failed');
     }
     setIsLoading(false);
   };
 
+  const handleSaveTrip = async () => {
+    const plan = lastPlanRef.current;
+    if (!plan) return;
+    setSaving(true);
+    try {
+      await saveTripToChain({
+        destination: selectedDestination?.name,
+        duration: parseInt(duration),
+        budget: parseInt(budget) || 1000,
+        travelers: parseInt(travelers),
+        preferences: preferences || 'general travel',
+        daily_plans: plan.daily_plans,
+        total_cost: totalCost,
+      });
+    } catch (e) {
+      console.error('Save failed:', e);
+    }
+    setSaving(false);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background via-blue-50/30 to-background dark:via-blue-950/20">
+    <div className="min-h-screen bg-gradient-to-b from-teal-50 via-white to-emerald-50 dark:from-teal-950/20 dark:via-background dark:to-emerald-950/20 relative">
+      {/* Floating travel decorations */}
+      <div className="absolute top-20 right-[10%] text-teal-300/20 dark:text-teal-500/20 animate-float">
+        <Globe className="h-14 w-14" />
+      </div>
+      <div className="absolute top-40 left-[8%] text-emerald-300/20 dark:text-emerald-500/20 animate-float-delayed">
+        <Plane className="h-12 w-12" />
+      </div>
+      <div className="absolute bottom-40 right-[12%] text-teal-300/15 dark:text-teal-500/15 animate-float-slow">
+        <Navigation className="h-8 w-8" />
+      </div>
+
+      {/* Dotted route lines */}
+      <div className="absolute top-1/4 left-0 w-full h-px pointer-events-none">
+        <svg className="w-full h-4" viewBox="0 0 1200 16" fill="none">
+          <path d="M0 8 C300 16, 500 0, 800 8 C1000 16, 1100 0, 1200 8" stroke="currentColor" className="text-teal-300/30 dark:text-teal-600/20" strokeWidth="2" strokeDasharray="4 4" />
+        </svg>
+      </div>
+
       <div className="container mx-auto px-4 py-12">
         <div className="text-center mb-12">
-          <Badge className="mb-4 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 text-blue-700 dark:text-blue-400">
+          <Badge className="mb-4 bg-gradient-to-r from-teal-500/10 to-emerald-500/10 text-teal-700 dark:text-teal-400">
             <Calendar className="mr-2 h-3 w-3" />
             AI Itinerary Generator
           </Badge>
@@ -227,7 +283,7 @@ export default function ItineraryPage() {
                 <Button
                   onClick={handleGenerateItinerary}
                   disabled={isLoading || !selectedDestination}
-                  className="w-full bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700"
+                  className="w-full bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
                 >
                   {isLoading ? (
                     <>
@@ -247,25 +303,50 @@ export default function ItineraryPage() {
 
           <div className="lg:col-span-3 space-y-6">
             {isLoading && (
-              <Card className="border-blue-200 dark:border-blue-800">
-                <CardContent className="py-12 text-center">
-                  <Loader2 className="mx-auto h-12 w-12 animate-spin text-blue-500 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">Generating Your Itinerary</h3>
-                  <p className="text-sm text-muted-foreground">
-                    AI validators are planning your trip to {selectedDestination?.name}...
-                  </p>
+              <Card className="border-teal-200 dark:border-teal-800">
+                <CardContent className="py-6">
+                  {consensusPhase !== 'complete' && consensusPhase !== 'failed' ? (
+                    <PlaneLoader
+                      label={
+                        consensusPhase === 'submitting' ? 'Submitting to GenLayer Bradbury...' :
+                        consensusPhase === 'validating' ? `Planning trip to ${selectedDestination?.name}...` :
+                        consensusPhase === 'comparing' ? 'Validating via EqNonComparative...' :
+                        'Processing...'
+                      }
+                    />
+                  ) : consensusPhase === 'complete' ? (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shrink-0">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Consensus Reached</p>
+                        <p className="text-sm text-muted-foreground">Validators agreed on-chain — result verified</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shrink-0">
+                        <Globe className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold">Transaction Pending</p>
+                        <p className="text-sm text-muted-foreground">Check explorer for finalization</p>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
 
             {dailyPlans.length > 0 && !isLoading && (
               <>
-                <Card className="border-2 border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30">
+                <Card className="border-2 border-teal-200 dark:border-teal-800 bg-gradient-to-r from-teal-50 to-emerald-50 dark:from-teal-950/30 dark:to-emerald-950/30">
                   <CardContent className="p-6">
                     <div className="flex flex-wrap gap-6 items-center justify-between">
                       <div className="space-y-4">
                         <div className="flex items-center gap-2">
-                          <MapPin className="h-5 w-5 text-blue-500" />
+                          <MapPin className="h-5 w-5 text-teal-500" />
                           <span className="font-semibold text-lg">{selectedDestination?.name}</span>
                         </div>
                         <div className="flex flex-wrap gap-6 text-sm">
@@ -290,15 +371,15 @@ export default function ItineraryPage() {
                 <div className="space-y-4">
                   {dailyPlans.map((plan) => (
                     <Card key={plan.day} className="overflow-hidden">
-                      <CardHeader className="bg-gradient-to-r from-blue-500/5 to-cyan-500/5">
+                      <CardHeader className="bg-gradient-to-r from-teal-500/5 to-emerald-500/5">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-lg flex items-center gap-2">
-                            <span className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center text-white text-sm font-bold">
+                            <span className="h-8 w-8 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white text-sm font-bold">
                               {plan.day}
                             </span>
                             Day {plan.day}: {plan.title}
                           </CardTitle>
-                          <Badge className="bg-gradient-to-r from-blue-500 to-cyan-600">
+                          <Badge className="bg-gradient-to-r from-teal-500 to-emerald-600">
                             ${plan.cost.toLocaleString()}
                           </Badge>
                         </div>
@@ -333,6 +414,14 @@ export default function ItineraryPage() {
                     </div>
                   </CardContent>
                 </Card>
+
+                <Button
+                  onClick={handleSaveTrip}
+                  disabled={saving}
+                  className="w-full bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700"
+                >
+                  {saving ? 'Saving...' : 'Save Trip to GenLayer'}
+                </Button>
               </>
             )}
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -16,8 +16,9 @@ import {
   CheckCircle2,
   Bookmark,
 } from 'lucide-react';
-import { connectWallet as glConnect, disconnectWallet as glDisconnect, loadStoredAddress, saveStoredAddress } from '@/lib/genlayer';
+import { connectWallet as glConnect, disconnectWallet as glDisconnect, loadStoredAddress, saveStoredAddress, isMetaMaskAvailable } from '@/lib/genlayer';
 import { cn } from '@/lib/utils';
+import MetaMaskRequiredModal from '@/components/MetaMaskRequiredModal';
 
 const features = [
   {
@@ -57,6 +58,7 @@ export function Header() {
   const [featuresOpen, setFeaturesOpen] = useState(false);
   const [walletAddress, setWalletAddress] = React.useState<string | null>(null);
   const [isConnecting, setIsConnecting] = React.useState(false);
+  const [showMetaMaskModal, setShowMetaMaskModal] = React.useState(false);
   const pathname = usePathname();
 
   React.useEffect(() => {
@@ -67,10 +69,15 @@ export function Header() {
   const connectWallet = async () => {
     setIsConnecting(true);
     try {
+      const mm = await isMetaMaskAvailable();
+      if (!mm) {
+        setShowMetaMaskModal(true);
+        return;
+      }
       const addr = await glConnect();
       setWalletAddress(addr);
     } catch {
-      // Fallback for demo / no-MetaMask environments
+      // Fallback for demo / no-wallet fallback
       const mockAddress = '0x' + Array.from({ length: 40 }, () =>
         Math.floor(Math.random() * 16).toString(16)
       ).join('');
@@ -91,7 +98,9 @@ export function Header() {
   };
 
   return (
-    <div className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <>
+      <MetaMaskRequiredModal open={showMetaMaskModal} onOpenChange={setShowMetaMaskModal} />
+      <div className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center space-x-2 group">
@@ -245,5 +254,6 @@ export function Header() {
         </div>
       </div>
     </div>
+    </>
   );
 }

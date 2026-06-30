@@ -192,6 +192,23 @@ export class NoWalletError extends Error {
   }
 }
 
+export class MetaMaskRequiredError extends Error {
+  constructor() {
+    super('MetaMask with GenLayer Snap is required.');
+    this.name = 'MetaMaskRequiredError';
+  }
+}
+
+export async function isMetaMaskAvailable(): Promise<boolean> {
+  if (!isBrowser() || !window.ethereum) return false;
+  try {
+    await window.ethereum.request({ method: 'wallet_getSnaps' });
+    return true;
+  } catch (e: any) {
+    return false;
+  }
+}
+
 function isBrowser() { return typeof window !== 'undefined'; }
 
 export function loadStoredAddress(): `0x${string}` | null {
